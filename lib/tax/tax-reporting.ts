@@ -493,10 +493,39 @@ export function buildForm1099Nec(params: {
 /** Wraps a value in double quotes and escapes internal quotes per RFC 4180. */
 function csvEscape(value: string | number | null | undefined): string {
   const str = value == null ? '' : String(value);
-  if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
-    return `"${str.replace(/"/g, '""')}"`;
+  const safe = spreadsheetSafe(str);
+  if (safe.includes(',') || safe.includes('"') || safe.includes('\n') || safe.includes('\r')) {
+    return `"${safe.replace(/"/g, '""')}"`;
   }
-  return str;
+  return safe;
+}
+
+/**
+ * Characters a spreadsheet treats as the start of a formula. A cell beginning
+ * with one of these is evaluated when the export is opened in Excel/Sheets, so
+ * a farmer-supplied memo or project name could execute a formula against the
+ * clerk's machine (CSV injection, CWE-1236).
+ */
+const FORMULA_PREFIXES = ['=', '+', '@', '\t', '\r'];
+
+/**
+ * `true` when `str` would be evaluated as a formula by a spreadsheet. A leading
+ * `-` is only dangerous when what follows is not a plain number: `-12.50` must
+ * keep being reported as a negative amount, while `-2+3` must not.
+ */
+function looksLikeFormula(str: string): boolean {
+  if (str.length === 0) return false;
+  if (str[0] === '-') return !Number.isFinite(Number(str));
+  return FORMULA_PREFIXES.includes(str[0]);
+}
+
+/**
+ * Neutralises a formula-looking cell by prefixing it with `'`, which makes
+ * spreadsheets read the rest of the cell as text. The value is left untouched
+ * for every non-spreadsheet CSV parser.
+ */
+function spreadsheetSafe(str: string): string {
+  return looksLikeFormula(str) ? `'${str}` : str;
 }
 
 function toCsv(rows: (string | number | null | undefined)[][]): string {
