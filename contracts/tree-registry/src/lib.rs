@@ -15,8 +15,8 @@ pub enum TreeRegistryError {
     SpeciesNotFound = 88,
     SpeciesAlreadyExists = 89,
     InvalidSpeciesName = 90,
-    BatchTooLarge = 88,
-    BatchSizeMismatch = 89,
+    BatchTooLarge = 94,
+    BatchSizeMismatch = 95,
     /// The tree registry has reached the maximum `u64` tree-id capacity and can
     /// no longer mint new trees.
     ContractFull = 91,
@@ -260,6 +260,174 @@ impl TreeRegistry {
         );
 
         tree_id
+    }
+
+    /// Mints up to 1000 trees in a single transaction, bundling the same
+    /// bookkeeping `mint_tree` does per-tree so many sponsors/planters don't
+    /// each pay separate transaction overhead. All trees share one `sponsor`;
+    /// `species`, `region`, and `planter` are parallel vecs, one entry per tree.
+    pub fn batch_mint_tree(
+        env: Env,
+        sponsor: Address,
+        species: Vec<soroban_sdk::String>,
+        region: Vec<soroban_sdk::String>,
+        planter: Vec<Address>,
+    ) -> Vec<u64> {
+        Self::assert_not_paused(&env);
+        Self::require_escrow(&env);
+
+        let len = species.len();
+        if len == 0 {
+            panic_with_error!(&env, HarvestaError::BatchEmpty);
+        }
+        if len > 1000 {
+            panic_with_error!(&env, TreeRegistryError::BatchTooLarge);
+        }
+        if len != region.len() || len != planter.len() {
+            panic_with_error!(&env, TreeRegistryError::BatchSizeMismatch);
+        }
+
+        let mut count: u64 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("TREECOUNT"))
+            .unwrap_or(0);
+
+        if count.checked_add(len as u64).is_none() {
+            env.events()
+                .publish((Symbol::new(&env, "ContractFull"), count), ());
+            panic_with_error!(&env, TreeRegistryError::ContractFull);
+        }
+
+        let spec_list_key = Self::species_list_key(&env);
+        let mut species_list: Vec<soroban_sdk::String> = env
+            .storage()
+            .instance()
+            .get(&spec_list_key)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let mut minted_ids: Vec<u64> = Vec::new(&env);
+
+        for i in 0..len {
+            let tree_species = species
+                .get(i)
+                .unwrap_or_else(|| panic_with_error!(&env, TreeRegistryError::NotFound));
+            let tree_region = region
+                .get(i)
+                .unwrap_or_else(|| panic_with_error!(&env, TreeRegistryError::NotFound));
+            let tree_planter = planter
+                .get(i)
+                .unwrap_or_else(|| panic_with_error!(&env, TreeRegistryError::NotFound));
+
+            Self::assert_in_season(&env, &tree_region);
+
+            let tree_id = count;
+            count += 1;
+
+            let record = TreeRecord {
+                id: tree_id,
+                species: tree_species.clone(),
+                sponsor: sponsor.clone(),
+                planter: tree_planter.clone(),
+                region: tree_region.clone(),
+                planted_at: env.ledger().timestamp(),
+                status: TreeStatus::Planted,
+                health: None,
+                notes_hash: None,
+                milestone_claims: 0,
+            };
+
+            let tree_key = Self::tree_key(&env, tree_id);
+            env.storage().persistent().set(&tree_key, &record);
+            Self::extend_ttl(&env, &tree_key);
+            Self::record_status(&env, tree_id, TreeStatus::Planted);
+
+            let p_key = Self::planter_key(&env, &tree_planter);
+            let mut planter_trees: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&p_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            planter_trees.push_back(tree_id);
+            env.storage().persistent().set(&p_key, &planter_trees);
+            Self::extend_ttl(&env, &p_key);
+
+            let sp_key = Self::sponsor_key(&env, &sponsor);
+            let mut sponsor_trees: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&sp_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            sponsor_trees.push_back(tree_id);
+            env.storage().persistent().set(&sp_key, &sponsor_trees);
+            Self::extend_ttl(&env, &sp_key);
+
+            if !species_list.contains(&tree_species) {
+                species_list.push_back(tree_species.clone());
+            }
+
+            let spec_key = Self::species_trees_key(&env, &tree_species);
+            let mut species_trees: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&spec_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            species_trees.push_back(tree_id);
+            env.storage().persistent().set(&spec_key, &species_trees);
+            Self::extend_ttl(&env, &spec_key);
+
+            let spec_reg_key = Self::species_region_key(&env, &tree_species, &tree_region);
+            let mut species_region_trees: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&spec_reg_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            species_region_trees.push_back(tree_id);
+            env.storage()
+                .persistent()
+                .set(&spec_reg_key, &species_region_trees);
+            Self::extend_ttl(&env, &spec_reg_key);
+
+            let spec_stat_key = Self::species_status_key(&env, &tree_species, &TreeStatus::Planted);
+            let mut species_status_trees: Vec<u64> = env
+                .storage()
+                .persistent()
+                .get(&spec_stat_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            species_status_trees.push_back(tree_id);
+            env.storage()
+                .persistent()
+                .set(&spec_stat_key, &species_status_trees);
+            Self::extend_ttl(&env, &spec_stat_key);
+
+            let reg_spec_key = Self::region_species_key(&env, &tree_region);
+            let mut region_species: Vec<soroban_sdk::String> = env
+                .storage()
+                .persistent()
+                .get(&reg_spec_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            if !region_species.contains(&tree_species) {
+                region_species.push_back(tree_species.clone());
+                env.storage()
+                    .persistent()
+                    .set(&reg_spec_key, &region_species);
+                Self::extend_ttl(&env, &reg_spec_key);
+            }
+
+            minted_ids.push_back(tree_id);
+        }
+
+        env.storage().instance().set(&spec_list_key, &species_list);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("TREECOUNT"), &count);
+
+        env.events().publish(
+            (Symbol::new(&env, "BatchTreesMinted"), sponsor),
+            (minted_ids.len() as u32, count),
+        );
+
+        minted_ids
     }
 
     pub fn add_verifier(env: Env, verifier: Address) {
@@ -1344,6 +1512,84 @@ mod tests {
         let window = client.get_planting_season(&region).unwrap();
         assert_eq!(window.start_month, 4);
         assert_eq!(window.end_month, 9);
+    }
+
+    #[test]
+    fn test_batch_mint_tree_success() {
+        let (env, _, _escrow, sponsor, planter, client) = setup();
+        let species = soroban_sdk::vec![
+            &env,
+            String::from_str(&env, "Oak"),
+            String::from_str(&env, "Pine")
+        ];
+        let region = soroban_sdk::vec![
+            &env,
+            String::from_str(&env, "Kaduna"),
+            String::from_str(&env, "Kaduna")
+        ];
+        let planters = soroban_sdk::vec![&env, planter.clone(), planter.clone()];
+
+        let ids = client.batch_mint_tree(&sponsor, &species, &region, &planters);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.get(0).unwrap(), 0);
+        assert_eq!(ids.get(1).unwrap(), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_batch_mint_tree_empty_rejected() {
+        let (env, _, _escrow, sponsor, _planter, client) = setup();
+        let species: Vec<soroban_sdk::String> = Vec::new(&env);
+        let region: Vec<soroban_sdk::String> = Vec::new(&env);
+        let planters: Vec<Address> = Vec::new(&env);
+        client.batch_mint_tree(&sponsor, &species, &region, &planters);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_batch_mint_tree_size_mismatch_rejected() {
+        let (env, _, _escrow, sponsor, planter, client) = setup();
+        let species = soroban_sdk::vec![&env, String::from_str(&env, "Oak")];
+        let region = soroban_sdk::vec![
+            &env,
+            String::from_str(&env, "Kaduna"),
+            String::from_str(&env, "Kaduna")
+        ];
+        let planters = soroban_sdk::vec![&env, planter.clone()];
+        client.batch_mint_tree(&sponsor, &species, &region, &planters);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_batch_mint_tree_outside_season_rejected() {
+        let (env, _, _escrow, sponsor, planter, client) = setup();
+        let region_name = String::from_str(&env, "Kaduna");
+        client.set_planting_season(&region_name, &4u32, &9u32);
+        client.set_current_month(&12u32);
+
+        let species = soroban_sdk::vec![&env, String::from_str(&env, "Oak")];
+        let region = soroban_sdk::vec![&env, region_name];
+        let planters = soroban_sdk::vec![&env, planter.clone()];
+        client.batch_mint_tree(&sponsor, &species, &region, &planters);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_batch_mint_tree_too_large_rejected() {
+        let (env, _, _escrow, sponsor, planter, client) = setup();
+        let species_name = String::from_str(&env, "Oak");
+        let region_name = String::from_str(&env, "Kaduna");
+
+        let mut species: Vec<soroban_sdk::String> = Vec::new(&env);
+        let mut region: Vec<soroban_sdk::String> = Vec::new(&env);
+        let mut planters: Vec<Address> = Vec::new(&env);
+        for _ in 0..1001 {
+            species.push_back(species_name.clone());
+            region.push_back(region_name.clone());
+            planters.push_back(planter.clone());
+        }
+
+        client.batch_mint_tree(&sponsor, &species, &region, &planters);
     }
 
     #[test]
