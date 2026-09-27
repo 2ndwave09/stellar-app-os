@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Tree Genetics Contract â€” track species DNA markers for biodiversity metrics
+//! Tree Genetics Contract — track species DNA markers for biodiversity metrics
 //!
 //! Closes #1098
 
