@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Staking Rewards Contract — earn XLM by sponsoring trees for 1+ years
+//! Staking Rewards Contract â€” earn XLM by sponsoring trees for 1+ years
 //!
 //! Closes #1095
 
