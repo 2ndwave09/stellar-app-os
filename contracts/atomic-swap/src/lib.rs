@@ -66,9 +66,7 @@ impl AtomicSwapContract {
             panic_with_error!(&env, Error::AlreadyInitialized);
         }
         admin.require_auth();
-        env.storage()
-            .instance()
-            .set(&symbol_short!("ADMIN"), &admin);
+        env.storage().instance().set(&symbol_short!("ADMIN"), &admin);
         env.storage().instance().set(&symbol_short!("NEXT"), &1u64);
     }
 
@@ -92,11 +90,7 @@ impl AtomicSwapContract {
             panic_with_error!(&env, Error::AlreadyExpired);
         }
 
-        let id: u64 = env
-            .storage()
-            .instance()
-            .get(&symbol_short!("NEXT"))
-            .unwrap_or(1);
+        let id: u64 = env.storage().instance().get(&symbol_short!("NEXT")).unwrap_or(1);
         let swap = Swap {
             id,
             initiator,
@@ -109,11 +103,8 @@ impl AtomicSwapContract {
             status: SwapStatus::Open,
         };
         env.storage().persistent().set(&DataKey::Swap(id), &swap);
-        env.storage()
-            .instance()
-            .set(&symbol_short!("NEXT"), &(id + 1));
-        env.events()
-            .publish((symbol_short!("swap"), symbol_short!("open")), id);
+        env.storage().instance().set(&symbol_short!("NEXT"), &(id + 1));
+        env.events().publish((symbol_short!("swap"), symbol_short!("open")), id);
         id
     }
 
@@ -131,17 +122,13 @@ impl AtomicSwapContract {
         if env.ledger().timestamp() >= swap.expiry {
             panic_with_error!(&env, Error::AlreadyExpired);
         }
-        // `sha256` returns a `Hash<32>`, which is deliberately not `PartialEq`
-        // against `BytesN<32>`, so compare the unwrapped bytes.
         let digest = env.crypto().sha256(&secret);
-        if digest.to_bytes() != swap.hashlock {
+        if digest != swap.hashlock {
             panic_with_error!(&env, Error::BadSecret);
         }
         swap.counterparty.require_auth();
         swap.status = SwapStatus::Completed;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Swap(swap_id), &swap);
+        env.storage().persistent().set(&DataKey::Swap(swap_id), &swap);
         env.events()
             .publish((symbol_short!("swap"), symbol_short!("done")), swap_id);
     }
@@ -162,9 +149,7 @@ impl AtomicSwapContract {
         }
         swap.initiator.require_auth();
         swap.status = SwapStatus::Refunded;
-        env.storage()
-            .persistent()
-            .set(&DataKey::Swap(swap_id), &swap);
+        env.storage().persistent().set(&DataKey::Swap(swap_id), &swap);
         env.events()
             .publish((symbol_short!("swap"), symbol_short!("refund")), swap_id);
     }

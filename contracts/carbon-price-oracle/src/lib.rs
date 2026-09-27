@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Carbon Price Oracle â€” dynamic pricing based on carbon credit market rates
+//! Carbon Price Oracle — dynamic pricing based on carbon credit market rates
 //!
 //! Closes #1094
 //!
