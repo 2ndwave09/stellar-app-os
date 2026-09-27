@@ -47,7 +47,7 @@ pub enum HarvestaError {
     CommitmentAlreadyRegistered = 60,
 
     // ── KYC attestation (61) ─────────────────────────────────────────────────
-    /// Caller is not a registered verifier — attest_kyc / verify_kyc denied.
+    /// Caller is not a registered verifier — `attest_kyc` / `verify_kyc` denied.
     NotVerifier = 61,
 
     // ── Dispute / arbiter (38–41, 47) ──────────────────────────────────────────
