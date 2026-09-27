@@ -7,7 +7,7 @@ import type { MarketplaceMarketSnapshot, MarketplaceNewsItem } from '@/lib/types
 export const MARKETPLACE_NEWS: MarketplaceNewsItem[] = [
   {
     id: 'price-west-africa-1',
-    category: 'price-trends',
+    category: 'price-movements',
     headline: 'West African restoration credits move higher on tight supply',
     summary:
       'Verified restoration credits are trading above last month’s average as buyers replenish 2025 delivery books.',

@@ -21,7 +21,7 @@ import { cn } from '@/lib/utils';
 
 const CATEGORY_OPTIONS: Array<{ value: MarketplaceNewsCategory | 'all'; label: string }> = [
   { value: 'all', label: 'All updates' },
-  { value: 'price-trends', label: 'Price trends' },
+  { value: 'price-movements', label: 'Price movements' },
   { value: 'policy', label: 'Policy' },
   { value: 'new-projects', label: 'New projects' },
   { value: 'buyer-demand', label: 'Buyer demand' },
@@ -29,7 +29,7 @@ const CATEGORY_OPTIONS: Array<{ value: MarketplaceNewsCategory | 'all'; label: s
 ];
 
 const CATEGORY_META: Record<MarketplaceNewsCategory, { label: string; icon: typeof BarChart3 }> = {
-  'price-trends': { label: 'Price trends', icon: BarChart3 },
+  'price-movements': { label: 'Price movements', icon: BarChart3 },
   policy: { label: 'Policy', icon: Scale },
   'new-projects': { label: 'New projects', icon: Leaf },
   'buyer-demand': { label: 'Buyer demand', icon: Users },
