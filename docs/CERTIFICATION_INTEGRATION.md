@@ -60,3 +60,15 @@ Before enabling this in a multi-instance production deployment:
 2. Implement `CertificationRepository` with the existing PostgreSQL pool.
 3. Replace the runtime repository binding in `lib/certification/runtime.ts`.
 4. Add scheduled/background renewal syncing only after provider rate limits and deployment scheduling are agreed; the request routes themselves perform no hidden polling.
+
+## Operational verification
+
+Before enabling a provider in a deployment, verify the following with a non-production API key and provider test project:
+
+1. `GET /api/v2/marketplace/certifications/projects/{provider}/{projectId}` returns `503 PROVIDER_NOT_CONFIGURED` when the provider base URL is absent.
+2. Project synchronization normalizes a valid provider response and rejects malformed or unknown provider payloads without exposing upstream credentials.
+3. Credit verification returns `verified` only when the serial, project, vintage, quantity, and active status match the request; mismatches remain non-verifying responses.
+4. A transient `429` or `5xx` response is retried within the configured limit, while repeated failure is returned as a normalized provider error.
+5. Renewal synchronization is idempotent: repeating the same provider/project request does not create duplicate document metadata.
+
+These checks confirm configuration and adapter compatibility without implying that registry data was submitted or that an on-chain certification transfer occurred.
