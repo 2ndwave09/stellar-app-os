@@ -3,6 +3,7 @@
 import { useCallback, useMemo, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { MarketplaceGrid } from '@/components/organisms/MarketplaceGrid/MarketplaceGrid';
+import { MarketplaceNewsFeed } from '@/components/organisms/MarketplaceNewsFeed/MarketplaceNewsFeed';
 import { MarketplaceFilters } from '@/components/molecules/MarketplaceFilters';
 import { PaginationControl } from '@/components/molecules/PaginationControl';
 import { Text } from '@/components/atoms/Text';
@@ -170,6 +171,8 @@ function MarketplacePageContent() {
           options.
         </Text>
       </header>
+
+      <MarketplaceNewsFeed />
 
       <div className="grid gap-8 lg:grid-cols-[300px_minmax(0,1fr)]">
         <aside>
