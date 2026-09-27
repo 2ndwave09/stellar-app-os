@@ -1,5 +1,5 @@
 export type MarketplaceNewsCategory =
-  'price-trends' | 'policy' | 'new-projects' | 'buyer-demand' | 'regional-insights';
+  'price-movements' | 'policy' | 'new-projects' | 'buyer-demand' | 'regional-insights';
 
 export interface MarketplaceNewsItem {
   id: string;
