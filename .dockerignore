@@ -1,0 +1,40 @@
+# Version control
+.git
+.gitignore
+
+# Dev artefacts
+.next
+node_modules
+npm-debug.log*
+yarn-error.log*
+
+# Docs / CI noise
+*.md
+*.log
+*.bat
+*.cmd
+*.ps1
+docs/
+.github/
+.kiro/
+.vscode/
+.husky/
+
+# Env files (secrets always injected via k8s Secrets)
+.env
+.env.*
+!.env.example
+
+# Rust / Soroban contracts (not needed in Next.js image)
+contracts/
+target/
+
+# Test data
+__tests__/
+*.test.ts
+*.spec.ts
+coverage/
+
+# Monitoring docker-compose (handled by k8s separately)
+docker-compose*.yml
+monitoring/
