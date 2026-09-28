@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
-    Address, BytesN, Env, Symbol,
+    Address, BytesN, Env, Symbol, Vec,
 };
 
 #[contracterror]
@@ -53,6 +53,8 @@ pub enum CarbonCreditsError {
     NoSequestrationAboveBaseline = 24,
     /// Soil bonus carbon credits were already awarded for this measurement.
     BonusAlreadyAwarded = 25,
+    /// No retirement record exists for the supplied id.
+    RetirementNotFound = 26,
 }
 
 // ── Units ─────────────────────────────────────────────────────────────────────
@@ -63,6 +65,15 @@ pub const GRAMS_PER_TON: u64 = 1_000_000;
 /// Smallest portion a retail buyer may take: exactly one ton rather than the
 /// 100+-ton blocks institutional buyers normally have to take (issue #1366).
 pub const MIN_RETAIL_PORTION_GRAMS: u64 = GRAMS_PER_TON;
+
+/// Retirement records are permanent: their TTL is bumped on write so the
+/// on-chain proof of retirement is not archived out from under the buyer.
+const RETIREMENT_BUMP_THRESHOLD: u32 = 100_000;
+const RETIREMENT_BUMP_AMOUNT: u32 = 500_000;
+
+/// Reason recorded when credits are retired through the legacy
+/// [`CarbonCredits::retire_offset`] entry point.
+const DEFAULT_RETIREMENT_REASON: Symbol = symbol_short!("offset");
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -196,6 +207,41 @@ pub struct SoilHealthScore {
     pub scored_at: u64,
 }
 
+/// Immutable proof that credits were permanently burned (issue #1422).
+///
+/// Written exactly once when credits are retired and never updated or
+/// deleted afterwards — the contract exposes no entry point that mutates a
+/// stored record. The burned grams leave both the owner's balance and the
+/// circulating supply, so the same credits can never be sold again.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetirementRecord {
+    /// Sequential id, starting at 1.
+    pub id: u64,
+    /// Account whose balance the credits were burned from.
+    pub owner: Address,
+    /// Grams of CO₂ burned.
+    pub amount: u64,
+    /// Why the credits were retired, e.g. `offset` or a claim reference.
+    pub reason: Symbol,
+    /// Ledger close time of the retirement.
+    pub retired_at: u64,
+    /// Ledger sequence of the retirement, for block-explorer lookups.
+    pub ledger: u32,
+}
+
+/// Network-wide credit supply, in grams of CO₂.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreditSupply {
+    /// Every gram ever minted by the contract.
+    pub issued: u64,
+    /// Every gram permanently burned through retirement.
+    pub retired: u64,
+    /// `issued - retired`: grams still available to hold, trade or retire.
+    pub circulating: u64,
+}
+
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -220,6 +266,18 @@ enum DataKey {
     SoilMeasurement(Symbol),
     /// Soil health calculated score, keyed by plot id.
     SoilScore(Symbol),
+    /// Grams minted across every account.
+    TotalIssued,
+    /// Grams burned through retirement across every account.
+    TotalRetired,
+    /// Number of retirement records written; also the id counter.
+    RetirementCount,
+    /// Immutable retirement record, keyed by id.
+    Retirement(u64),
+    /// Number of retirements made by an owner.
+    OwnerRetirementCount(Address),
+    /// Owner's n-th retirement (0-based) → retirement id.
+    OwnerRetirement(Address, u64),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -302,33 +360,87 @@ impl CarbonCredits {
     }
 
     /// Sponsor-only: retire offsets by permanently deducting them from TotalOffset.
+    ///
+    /// Equivalent to [`Self::retire_credits`] with the reason `offset`; kept
+    /// for existing callers.
     pub fn retire_offset(env: Env, sponsor: Address, amount: u64) {
         sponsor.require_auth();
+        Self::burn_for_retirement(&env, &sponsor, amount, DEFAULT_RETIREMENT_REASON);
+    }
 
-        if amount == 0 {
-            panic_with_error!(&env, CarbonCreditsError::InvalidAmount);
-        }
+    // ── Permanent retirement / burn (issue #1422) ─────────────────────────────
 
-        let total_key = DataKey::TotalOffset(sponsor.clone());
-        let current_total: u64 = env.storage().persistent().get(&total_key).unwrap_or(0u64);
+    /// Owner-only: permanently burn `amount` grams from the owner's balance
+    /// and from the circulating supply, returning the id of the immutable
+    /// [`RetirementRecord`] written for it.
+    ///
+    /// Burned credits cannot be transferred, listed in a retail lot or retired
+    /// a second time, which is what prevents double-selling.
+    pub fn retire_credits(env: Env, owner: Address, amount: u64, reason: Symbol) -> u64 {
+        owner.require_auth();
+        Self::burn_for_retirement(&env, &owner, amount, reason)
+    }
 
-        if amount > current_total {
-            panic_with_error!(&env, CarbonCreditsError::InsufficientOffsets);
-        }
-
-        let retired_key = DataKey::RetiredOffset(sponsor.clone());
-        let current_retired: u64 = env.storage().persistent().get(&retired_key).unwrap_or(0u64);
-
-        // Update states
+    /// Returns the immutable record for a retirement id.
+    pub fn get_retirement(env: Env, id: u64) -> RetirementRecord {
         env.storage()
             .persistent()
-            .set(&total_key, &(current_total - amount));
-        env.storage()
-            .persistent()
-            .set(&retired_key, &(current_retired + amount));
+            .get(&DataKey::Retirement(id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::RetirementNotFound))
+    }
 
-        env.events()
-            .publish((symbol_short!("retire"), sponsor), amount);
+    /// Number of retirement records written so far (the latest id).
+    pub fn retirement_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::RetirementCount)
+            .unwrap_or(0u64)
+    }
+
+    /// Up to `limit` retirement ids for `owner`, oldest first, starting at
+    /// the owner's `start`-th retirement (0-based).
+    pub fn retirements_for_owner(env: Env, owner: Address, start: u64, limit: u32) -> Vec<u64> {
+        let count: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OwnerRetirementCount(owner.clone()))
+            .unwrap_or(0u64);
+        let end = count.min(start.saturating_add(limit as u64));
+
+        let mut ids = Vec::new(&env);
+        let mut index = start;
+        while index < end {
+            if let Some(id) = env
+                .storage()
+                .persistent()
+                .get::<_, u64>(&DataKey::OwnerRetirement(owner.clone(), index))
+            {
+                ids.push_back(id);
+            }
+            index += 1;
+        }
+        ids
+    }
+
+    /// Network-wide issued, retired and circulating supply, in grams.
+    pub fn credit_supply(env: Env) -> CreditSupply {
+        let issued: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalIssued)
+            .unwrap_or(0u64);
+        let retired: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRetired)
+            .unwrap_or(0u64);
+        CreditSupply {
+            issued,
+            retired,
+            // Balances minted before supply tracking existed can be retired
+            // too, so never underflow.
+            circulating: issued.saturating_sub(retired),
+        }
     }
 
     /// Returns the total permanently retired offsets for a sponsor.
@@ -793,11 +905,111 @@ impl CarbonCredits {
         let key = DataKey::TotalOffset(sponsor.clone());
         let current: u64 = env.storage().persistent().get(&key).unwrap_or(0u64);
         env.storage().persistent().set(&key, &(current + delta));
+        Self::add_issued(&env, delta);
 
         env.events().publish(
             (symbol_short!("credit"), symbol_short!("recorded")),
             (sponsor, delta),
         );
+    }
+
+    /// Count freshly minted grams toward the network-wide issued supply.
+    fn add_issued(env: &Env, grams: u64) {
+        let issued: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalIssued)
+            .unwrap_or(0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalIssued, &(issued + grams));
+    }
+
+    /// Burn `amount` grams from `owner`, update the retired supply and write
+    /// the immutable retirement record. Caller must have checked auth.
+    fn burn_for_retirement(env: &Env, owner: &Address, amount: u64, reason: Symbol) -> u64 {
+        if amount == 0 {
+            panic_with_error!(env, CarbonCreditsError::InvalidAmount);
+        }
+
+        let balance_key = DataKey::TotalOffset(owner.clone());
+        let balance: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0u64);
+        if amount > balance {
+            panic_with_error!(env, CarbonCreditsError::InsufficientOffsets);
+        }
+
+        // Burn from the owner's balance.
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - amount));
+
+        let retired_key = DataKey::RetiredOffset(owner.clone());
+        let owner_retired: u64 = env.storage().persistent().get(&retired_key).unwrap_or(0u64);
+        env.storage()
+            .persistent()
+            .set(&retired_key, &(owner_retired + amount));
+
+        // Burn from circulation.
+        let total_retired: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalRetired)
+            .unwrap_or(0u64);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalRetired, &(total_retired + amount));
+
+        // Write-once record.
+        let id: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RetirementCount)
+            .unwrap_or(0u64)
+            + 1;
+        env.storage().instance().set(&DataKey::RetirementCount, &id);
+
+        let record = RetirementRecord {
+            id,
+            owner: owner.clone(),
+            amount,
+            reason: reason.clone(),
+            retired_at: env.ledger().timestamp(),
+            ledger: env.ledger().sequence(),
+        };
+        let record_key = DataKey::Retirement(id);
+        env.storage().persistent().set(&record_key, &record);
+        env.storage().persistent().extend_ttl(
+            &record_key,
+            RETIREMENT_BUMP_THRESHOLD,
+            RETIREMENT_BUMP_AMOUNT,
+        );
+
+        let owner_count_key = DataKey::OwnerRetirementCount(owner.clone());
+        let owner_count: u64 = env
+            .storage()
+            .persistent()
+            .get(&owner_count_key)
+            .unwrap_or(0u64);
+        let owner_index_key = DataKey::OwnerRetirement(owner.clone(), owner_count);
+        env.storage().persistent().set(&owner_index_key, &id);
+        env.storage().persistent().extend_ttl(
+            &owner_index_key,
+            RETIREMENT_BUMP_THRESHOLD,
+            RETIREMENT_BUMP_AMOUNT,
+        );
+        env.storage()
+            .persistent()
+            .set(&owner_count_key, &(owner_count + 1));
+
+        // Unchanged legacy event, then the full record for indexers.
+        env.events()
+            .publish((symbol_short!("retire"), owner.clone()), amount);
+        env.events().publish(
+            (symbol_short!("retire"), symbol_short!("record")),
+            (id, owner.clone(), amount, reason),
+        );
+
+        id
     }
 
     // ── Soil Health Scoring & Regenerative Agriculture Incentives (issue #1386) ──
@@ -933,6 +1145,7 @@ impl CarbonCredits {
             let key = DataKey::TotalOffset(score.farmer.clone());
             let current: u64 = env.storage().persistent().get(&key).unwrap_or(0u64);
             env.storage().persistent().set(&key, &(current + bonus));
+            Self::add_issued(&env, bonus);
         }
 
         score.bonus_awarded = true;
@@ -1851,5 +2064,164 @@ mod tests {
         assert_eq!(lot.remaining, 90_000_000);
         assert!(lot.active);
         assert_eq!(pay_balance(&env, &usdc, &seller), 50);
+    }
+
+    // ── Permanent retirement / burn (issue #1422) ─────────────────────────────
+
+    #[test]
+    fn test_minting_tracks_issued_supply() {
+        let (env, _, client) = setup();
+        let holder = Address::generate(&env);
+        give_tons(&env, &client, &holder, 3);
+
+        let supply = client.credit_supply();
+        assert_eq!(supply.issued, 3_000_000);
+        assert_eq!(supply.retired, 0);
+        assert_eq!(supply.circulating, 3_000_000);
+    }
+
+    #[test]
+    fn test_retire_credits_burns_from_balance_and_circulation() {
+        use soroban_sdk::testutils::Ledger as _;
+
+        let (env, _, client) = setup();
+        env.ledger().with_mut(|ledger| {
+            ledger.timestamp = 1_700_000_000;
+            ledger.sequence_number = 42;
+        });
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 5);
+
+        let reason = Symbol::new(&env, "scope1_2026");
+        let id = client.retire_credits(&buyer, &2_000_000_u64, &reason);
+        assert_eq!(id, 1);
+
+        assert_eq!(client.total_offset_for_sponsor(&buyer), 3_000_000);
+        assert_eq!(client.total_retired_for_sponsor(&buyer), 2_000_000);
+
+        let supply = client.credit_supply();
+        assert_eq!(supply.issued, 5_000_000);
+        assert_eq!(supply.retired, 2_000_000);
+        assert_eq!(supply.circulating, 3_000_000);
+
+        let record = client.get_retirement(&id);
+        assert_eq!(
+            record,
+            RetirementRecord {
+                id: 1,
+                owner: buyer.clone(),
+                amount: 2_000_000,
+                reason,
+                retired_at: 1_700_000_000,
+                ledger: 42,
+            }
+        );
+        assert_eq!(client.retirement_count(), 1);
+    }
+
+    #[test]
+    fn test_retire_offset_writes_retirement_record() {
+        let (env, _, client) = setup();
+        let sponsor = Address::generate(&env);
+        give_tons(&env, &client, &sponsor, 1);
+
+        client.retire_offset(&sponsor, &400_000_u64);
+
+        let record = client.get_retirement(&1);
+        assert_eq!(record.owner, sponsor);
+        assert_eq!(record.amount, 400_000);
+        assert_eq!(record.reason, symbol_short!("offset"));
+        assert_eq!(client.credit_supply().retired, 400_000);
+    }
+
+    #[test]
+    fn test_retirement_records_are_not_overwritten() {
+        let (env, _, client) = setup();
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 3);
+
+        let first = client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("a"));
+        let second = client.retire_credits(&buyer, &500_000_u64, &symbol_short!("b"));
+        assert_eq!((first, second), (1, 2));
+
+        // The first record keeps its original contents after later retirements.
+        let record = client.get_retirement(&first);
+        assert_eq!(record.amount, 1_000_000);
+        assert_eq!(record.reason, symbol_short!("a"));
+        assert_eq!(client.get_retirement(&second).amount, 500_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_retired_credits_cannot_be_retired_again() {
+        let (env, _, client) = setup();
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 1);
+
+        client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("offset"));
+        client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("offset"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_retired_credits_cannot_be_resold() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 2);
+
+        client.retire_credits(&seller, &2_000_000_u64, &symbol_short!("offset"));
+        // Nothing is left to list, so the burned tons cannot be sold on.
+        client.open_retail_lot(&seller, &Symbol::new(&env, "proj1"), &1_000_000_u64, &5_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #3)")]
+    fn test_retire_credits_zero_amount_panics() {
+        let (env, _, client) = setup();
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 1);
+        client.retire_credits(&buyer, &0_u64, &symbol_short!("offset"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_retire_credits_above_balance_panics() {
+        let (env, _, client) = setup();
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 1);
+        client.retire_credits(&buyer, &1_000_001_u64, &symbol_short!("offset"));
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #26)")]
+    fn test_get_unknown_retirement_panics() {
+        let (_, _, client) = setup();
+        client.get_retirement(&1);
+    }
+
+    #[test]
+    fn test_retirements_for_owner_paginates() {
+        let (env, _, client) = setup();
+        let buyer = Address::generate(&env);
+        let other = Address::generate(&env);
+        give_tons(&env, &client, &buyer, 3);
+        give_tons(&env, &client, &other, 1);
+
+        client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("a"));
+        client.retire_credits(&other, &1_000_000_u64, &symbol_short!("b"));
+        client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("c"));
+        client.retire_credits(&buyer, &1_000_000_u64, &symbol_short!("d"));
+
+        let all = client.retirements_for_owner(&buyer, &0_u64, &10_u32);
+        assert_eq!(all, Vec::from_array(&env, [1_u64, 3, 4]));
+
+        let page = client.retirements_for_owner(&buyer, &1_u64, &1_u32);
+        assert_eq!(page, Vec::from_array(&env, [3_u64]));
+
+        assert_eq!(
+            client.retirements_for_owner(&other, &0_u64, &10_u32),
+            Vec::from_array(&env, [2_u64])
+        );
+        assert_eq!(client.credit_supply().circulating, 0);
     }
 }
