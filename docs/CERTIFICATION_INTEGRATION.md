@@ -72,3 +72,7 @@ Before enabling a provider in a deployment, verify the following with a non-prod
 5. Renewal synchronization is idempotent: repeating the same provider/project request does not create duplicate document metadata.
 
 These checks confirm configuration and adapter compatibility without implying that registry data was submitted or that an on-chain certification transfer occurred.
+
+## Security review notes
+
+Provider tokens must remain server-side secrets. Review deployments for secret-manager injection, HTTPS-only endpoints, redacted request logging, and separate credentials for each registry. Provider responses should be treated as untrusted input and remain subject to the adapter schemas and normalized error boundary.
