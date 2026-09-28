@@ -13,6 +13,12 @@ export interface EsgReportData {
   projectsSupported: string[];
   period: string;
   reportId: string;
+  offsets?: Array<{
+    projectName: string;
+    creditType: string;
+    tonnesCo2e: number;
+    verification: string;
+  }>;
 }
 
 export function generateEsgReport(data: EsgReportData): void {
@@ -71,16 +77,48 @@ export function generateEsgReport(data: EsgReportData): void {
   y += 10;
   doc.setFontSize(10);
   doc.setTextColor(100, 116, 139);
-  data.projectsSupported.forEach((project, index) => {
-    doc.text(`• ${project}`, 25, y + index * 7);
-  });
 
-  // Footer
-  doc.setFontSize(8);
-  doc.setTextColor(150, 150, 150);
-  doc.text(`Report ID: ${data.reportId} | Verified via Stellar Blockchain`, pageWidth / 2, 280, {
-    align: 'center',
-  });
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const bottomMargin = 25;
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageHeight - bottomMargin) {
+      doc.addPage();
+      y = 25;
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+    }
+  };
+
+  if (data.offsets?.length) {
+    data.offsets.forEach((line) => {
+      ensureSpace(14);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(0, 0, 0);
+      doc.text(`• ${line.projectName}`, 25, y);
+      doc.text(`${line.tonnesCo2e.toLocaleString()} tCO2e`, pageWidth - 20, y, { align: 'right' });
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(`${line.creditType} · ${line.verification}`, 30, y + 5);
+      y += 14;
+    });
+  } else {
+    data.projectsSupported.forEach((project) => {
+      ensureSpace(7);
+      doc.text(`• ${project}`, 25, y);
+      y += 7;
+    });
+  }
+
+  // Footer (on every page)
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 150);
+    doc.text(`Report ID: ${data.reportId} | Page ${page} of ${pageCount}`, pageWidth / 2, 285, {
+      align: 'center',
+    });
+  }
 
   doc.save(`esg-report-${data.companyName.replace(/\s+/g, '-').toLowerCase()}.pdf`);
 }

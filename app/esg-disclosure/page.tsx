@@ -4,7 +4,9 @@ import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { generateEsgReport } from '@/lib/corporate';
+import type { BuyerAnalyticsSummary } from '@/lib/api/buyer-analytics';
 import {
+  buildEsgInputFromAnalytics,
   createEsgDisclosure,
   defaultEsgDisclosure,
   parseEsgShareParams,
@@ -19,11 +21,53 @@ function EsgDisclosureTool() {
   );
   const [form, setForm] = useState<EsgDisclosureInput>(initial);
   const [shareNote, setShareNote] = useState('');
+  const [buyerId, setBuyerId] = useState('');
+  const [loadState, setLoadState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [loadMessage, setLoadMessage] = useState('');
   const report = useMemo(() => createEsgDisclosure(form), [form]);
 
   const update = (patch: Partial<EsgDisclosureInput>) => {
     setForm((current) => ({ ...current, ...patch }));
     setShareNote('');
+  };
+
+  const handleLoadOffsets = async () => {
+    const id = buyerId.trim();
+    if (!id) {
+      setLoadState('error');
+      setLoadMessage('Enter your buyer ID to load your carbon offset data.');
+      return;
+    }
+    setLoadState('loading');
+    setLoadMessage('');
+    try {
+      const response = await fetch(`/api/v2/buyer-analytics?buyerId=${encodeURIComponent(id)}`);
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message =
+          typeof body === 'object' && body !== null && 'error' in body
+            ? String((body as { error: unknown }).error)
+            : 'Could not load offset data.';
+        throw new Error(message);
+      }
+      const summary = body as BuyerAnalyticsSummary;
+      setForm((current) =>
+        buildEsgInputFromAnalytics(summary, {
+          companyName: current.companyName,
+          period: current.period,
+        })
+      );
+      setShareNote('');
+      setLoadState('idle');
+      setLoadMessage(
+        summary.supplyChain.length
+          ? `Loaded ${summary.supplyChain.length} project(s) from your offset purchases.`
+          : 'No offset purchases found for this buyer ID.'
+      );
+    } catch (error) {
+      setLoadState('error');
+      setLoadMessage(error instanceof Error ? error.message : 'Could not load offset data.');
+    }
   };
 
   const handleExport = () => {
@@ -34,6 +78,7 @@ function EsgDisclosureTool() {
       projectsSupported: report.projectsSupported,
       period: report.period,
       reportId: report.reportId,
+      offsets: report.offsets,
     });
   };
 
@@ -58,13 +103,40 @@ function EsgDisclosureTool() {
             ESG disclosure report
           </h1>
           <p className="mt-5 text-lg leading-8 text-muted-foreground">
-            Create a disclosure from your carbon offset purchases and share it with investors
-            and stakeholders. Figures can be exported as a PDF or sent as a link.
+            Create a disclosure from your carbon offset purchases and share it with investors and
+            stakeholders. Figures can be exported as a PDF or sent as a link.
           </p>
         </div>
 
         <div className="mt-10 grid gap-8 lg:grid-cols-2">
           <form className="space-y-4 rounded-2xl border border-border bg-card p-6 shadow-sm">
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <label className="block">
+                <span className="text-sm font-medium text-foreground">Buyer ID</span>
+                <input
+                  value={buyerId}
+                  onChange={(event) => setBuyerId(event.target.value)}
+                  placeholder="Your buyer ID"
+                  className="mt-2 w-full rounded-lg border border-border bg-background px-4 py-3 text-foreground outline-none focus:ring-2 focus:ring-stellar-blue"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={handleLoadOffsets}
+                disabled={loadState === 'loading'}
+                className="mt-3 rounded-lg bg-stellar-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {loadState === 'loading' ? 'Loading…' : 'Load my offset data'}
+              </button>
+              {loadMessage && (
+                <p
+                  role={loadState === 'error' ? 'alert' : 'status'}
+                  className={`mt-2 text-sm ${loadState === 'error' ? 'text-red-600' : 'text-stellar-blue'}`}
+                >
+                  {loadMessage}
+                </p>
+              )}
+            </div>
             <label className="block">
               <span className="text-sm font-medium text-foreground">Company name</span>
               <input
@@ -105,9 +177,7 @@ function EsgDisclosureTool() {
               </label>
             </div>
             <label className="block">
-              <span className="text-sm font-medium text-foreground">
-                Projects (one per line)
-              </span>
+              <span className="text-sm font-medium text-foreground">Projects (one per line)</span>
               <textarea
                 rows={5}
                 value={form.projectsSupported.join('\n')}
@@ -161,6 +231,11 @@ function EsgDisclosureTool() {
             <h3 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground">
               Carbon offset line items
             </h3>
+            {report.offsets?.length === 0 && (
+              <p className="mt-3 text-sm text-muted-foreground">
+                No carbon offset line items yet. Load your offset data to include them.
+              </p>
+            )}
             <ul className="mt-3 space-y-3">
               {(report.offsets ?? []).map((line) => (
                 <li
@@ -173,9 +248,7 @@ function EsgDisclosureTool() {
                       {line.creditType} · {line.verification}
                     </p>
                   </div>
-                  <p className="text-sm font-semibold text-stellar-blue">
-                    {line.tonnesCo2e} tCO2e
-                  </p>
+                  <p className="text-sm font-semibold text-stellar-blue">{line.tonnesCo2e} tCO2e</p>
                 </li>
               ))}
             </ul>
