@@ -1,9 +1,11 @@
 /**
- * Buyer CSR / ESG disclosure helpers — Issue #1379
+ * Buyer CSR / ESG disclosure helpers — Issue #1317
  *
  * Builds a shareable ESG disclosure from buyer carbon-offset data so
  * companies can send a report to investors and stakeholders.
  */
+
+import type { BuyerAnalyticsSummary } from '@/lib/api/buyer-analytics';
 
 export type EsgOffsetLine = {
   projectName: string;
@@ -66,7 +68,10 @@ export function buildEsgReportId(companyName: string, period: string): string {
     .replace(/[^A-Z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 24);
-  const periodSlug = period.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '');
+  const periodSlug = period
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
   return `ESG-${periodSlug || 'PERIOD'}-${slug || 'BUYER'}`;
 }
 
@@ -78,6 +83,7 @@ export function buildEsgSharePath(input: EsgDisclosureInput): string {
     co2: String(input.totalCo2Offset),
     projects: input.projectsSupported.join('|'),
   });
+  if (input.offsets?.length) params.set('offsets', JSON.stringify(input.offsets));
   return `/esg-disclosure?${params.toString()}`;
 }
 
@@ -98,7 +104,87 @@ export function parseEsgShareParams(params: URLSearchParams): EsgDisclosureInput
           .map((name) => name.trim())
           .filter(Boolean)
       : defaults.projectsSupported,
-    offsets: defaults.offsets,
+    offsets: parseEsgOffsetsParam(params.get('offsets')),
+  };
+}
+
+/** Reads the `offsets` share param, dropping anything that is not a valid line. */
+export function parseEsgOffsetsParam(raw: string | null): EsgOffsetLine[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item): EsgOffsetLine[] => {
+      if (typeof item !== 'object' || item === null) return [];
+      const line = item as Record<string, unknown>;
+      const tonnes = Number(line.tonnesCo2e);
+      if (
+        typeof line.projectName !== 'string' ||
+        typeof line.creditType !== 'string' ||
+        typeof line.verification !== 'string' ||
+        !Number.isFinite(tonnes) ||
+        tonnes < 0
+      ) {
+        return [];
+      }
+      return [
+        {
+          projectName: line.projectName,
+          creditType: line.creditType,
+          tonnesCo2e: tonnes,
+          verification: line.verification,
+        },
+      ];
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 1 TREE token = 48 kg CO2 (CO2_KG_PER_TREE in lib/stellar/tree-asset.ts).
+ * Mirrored here, as lib/api/ghg-protocol.ts does, so client code does not
+ * import the Stellar SDK.
+ */
+const CO2_KG_PER_TREE = 48;
+
+const PLATFORM_LABELS: Record<string, string> = {
+  stellar: 'Stellar on-chain',
+  'tree-registry': 'Tree registry',
+  verra: 'Verra VCS',
+  'gold-standard': 'Gold Standard',
+  'climate-action-reserve': 'Climate Action Reserve',
+  'plan-vivo': 'Plan Vivo',
+  unverified: 'Unverified',
+};
+
+const round1 = (value: number): number => Math.round(value * 10) / 10;
+
+/**
+ * Maps a buyer-analytics summary (real offset purchases) onto ESG disclosure
+ * input. Trees supported is derived from sequestration tonnes.
+ */
+export function buildEsgInputFromAnalytics(
+  summary: BuyerAnalyticsSummary,
+  meta: { companyName: string; period: string }
+): EsgDisclosureInput {
+  const offsets: EsgOffsetLine[] = summary.supplyChain.map((project) => ({
+    projectName: project.projectName,
+    creditType:
+      project.assetType === 'sequestration'
+        ? 'Tree sequestration'
+        : (project.projectType ?? 'Carbon credit'),
+    tonnesCo2e: round1(project.tonnes),
+    verification: PLATFORM_LABELS[project.platform] ?? project.platform,
+  }));
+
+  return {
+    companyName: meta.companyName,
+    period: meta.period,
+    totalTrees: Math.round((summary.totals.sequestrationTonnes * 1000) / CO2_KG_PER_TREE),
+    totalCo2Offset: round1(summary.totals.totalTonnes),
+    projectsSupported: offsets.map((line) => line.projectName),
+    offsets,
   };
 }
 
@@ -106,7 +192,7 @@ export function createEsgDisclosure(input: EsgDisclosureInput): EsgDisclosureRep
   const companyName = input.companyName.trim() || 'Unnamed buyer';
   const period = input.period.trim() || 'Current period';
   const projectsSupported = input.projectsSupported.map((name) => name.trim()).filter(Boolean);
-  const offsets = input.offsets?.length ? input.offsets : SAMPLE_OFFSETS;
+  const offsets = input.offsets ?? [];
   const report: EsgDisclosureReport = {
     companyName,
     period,
