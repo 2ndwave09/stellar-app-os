@@ -10,6 +10,7 @@ members = [
     "escrow-milestone",
     "tree-escrow",
     "farmer-registry",
+    "farmer-escrow",
     "donation-escrow",
     "zk-location-verifier",
     "zk-verifier",
@@ -43,6 +44,9 @@ members = [
     "community-offset-pool",
     "xlm-bridge",
     "insurance-pool",
+    "atomic-swap",
+    "farmer-bonus-pool",
+    "carbon-fractionalization",
 ]
 resolver = "2"
 
