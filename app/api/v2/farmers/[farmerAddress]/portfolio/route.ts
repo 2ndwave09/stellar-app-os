@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiVersionHeaders } from '@/lib/api/versioning';
 import {
+  FarmerNotFoundError,
   getFarmerPortfolio,
   isStellarAddress,
 } from '@/lib/api/farmer-portfolio';
@@ -55,6 +56,12 @@ export async function GET(
     const portfolio = await getFarmerPortfolio(farmerAddress.trim());
     return NextResponse.json(portfolio, { headers: responseHeaders() });
   } catch (error) {
+    if (error instanceof FarmerNotFoundError) {
+      return NextResponse.json(
+        { error: 'Farmer not found', code: 'not_found' },
+        { status: 404, headers: responseHeaders() }
+      );
+    }
     console.error('[api/v2/farmers/[farmerAddress]/portfolio] error:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
