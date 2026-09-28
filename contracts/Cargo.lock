@@ -983,6 +983,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "farmer-escrow"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "fiat-crypto"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
