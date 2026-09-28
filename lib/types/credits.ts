@@ -28,6 +28,7 @@ export interface OwnedCredit extends CreditHolding {
 
 export interface PortfolioStats {
   totalCredits: number;
+  totalCost: number;
   totalValue: number;
   activeCredits: number;
   retiredCredits: number;
