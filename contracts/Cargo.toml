@@ -41,6 +41,7 @@ members = [
     "staking-rewards",
     "tree-genetics",
     "carbon-price-oracle",
+    "carbon-futures",
     "community-offset-pool",
     "atomic-swap",
     "farmer-bonus-pool",
