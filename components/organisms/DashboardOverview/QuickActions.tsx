@@ -49,9 +49,9 @@ export function QuickActions() {
         'bg-stellar-purple/10 text-stellar-purple group-hover:bg-stellar-purple group-hover:text-white',
     },
     {
-      label: 'View Portfolio',
+      label: 'Owned Credits',
       icon: <BarChart3 size={20} />,
-      description: 'Track your holdings',
+      description: 'Track purchased credits',
       path: '/dashboard/credits',
       color:
         'bg-stellar-purple/10 text-stellar-purple group-hover:bg-stellar-purple group-hover:text-white',

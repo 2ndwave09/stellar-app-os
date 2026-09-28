@@ -147,17 +147,6 @@ function ProjectsContent(): JSX.Element {
               Discover and compare high-integrity projects by type, location, certification standard, and co-benefits.
             </Text>
           </div>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)}
-            className="lg:hidden"
-            aria-label="Toggle filters"
-            aria-expanded={isMobileFilterOpen}
-          >
-            Filters
-          </Button>
-        </div>
 
         {/* Search Bar & Co-Benefit Quick Filters */}
         <div className="mb-6 space-y-3 bg-card/60 backdrop-blur-sm p-4 rounded-xl border border-border/60">
