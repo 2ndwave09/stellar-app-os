@@ -7,6 +7,8 @@ import { MarketplaceNewsFeed } from '@/components/organisms/MarketplaceNewsFeed/
 import { MarketplaceFilters } from '@/components/molecules/MarketplaceFilters';
 import { PaginationControl } from '@/components/molecules/PaginationControl';
 import { Text } from '@/components/atoms/Text';
+import { Button } from '@/components/atoms/Button';
+import Link from 'next/link';
 import { getMockMarketplaceListings } from '@/lib/api/mock/marketplaceListings';
 import type { FundingStatus, ProjectType, SortOption } from '@/lib/types/marketplace';
 import { CertificationFilter } from '@/components/marketplace/CertificationFilter';
@@ -195,14 +197,33 @@ function MarketplacePageContent() {
 
   return (
     <main className="container mx-auto px-4 py-8 max-w-7xl">
-      <header className="mb-8">
-        <Text variant="h2" as="h1" className="mb-2">
-          Carbon Credit Marketplace
-        </Text>
-        <Text variant="muted" as="p">
-          Browse verified agricultural credit listings with shareable filter URLs and sorting
-          options.
-        </Text>
+      <header className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <Text variant="h2" as="h1" className="mb-2">
+            Carbon Credit Marketplace
+          </Text>
+          <Text variant="muted" as="p">
+            Browse verified agricultural credit listings with shareable filter URLs and sorting
+            options.
+          </Text>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link href="/marketplace/corporate">
+            <Button variant="outline" size="sm" className="text-xs cursor-pointer">
+              🏢 Corporate Program
+            </Button>
+          </Link>
+          <Link href="/projects/map">
+            <Button variant="outline" size="sm" className="text-xs cursor-pointer">
+              🗺 Offset Map
+            </Button>
+          </Link>
+          <Link href="/marketplace/bulk">
+            <Button size="sm" className="text-xs cursor-pointer">
+              Bulk Purchasing &rarr;
+            </Button>
+          </Link>
+        </div>
       </header>
 
       <MarketplaceNewsFeed />

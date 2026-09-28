@@ -17,6 +17,8 @@ import {
 import { createDefaultFilters } from '@/lib/types/filters';
 import type { ProjectFilters } from '@/lib/types/filters';
 import { ProjectCard } from '@/components/molecules/ProjectCard/ProjectCard';
+import { OffsetProjectMapWrapper } from '@/components/organisms/OffsetProjectMap/OffsetProjectMapWrapper';
+import Link from 'next/link';
 
 function ProjectsContent(): JSX.Element {
   const router = useRouter();
@@ -24,6 +26,7 @@ function ProjectsContent(): JSX.Element {
   const [filters, setFilters] = useState<ProjectFilters>(createDefaultFilters());
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
   const [searchInput, setSearchInput] = useState('');
+  const [viewMode, setViewMode] = useState<'grid' | 'map'>('grid');
 
   useEffect(() => {
     const urlFilters = parseFiltersFromUrl(searchParams);
@@ -227,51 +230,90 @@ function ProjectsContent(): JSX.Element {
           </div>
         </div>
 
-        {/* Results Counter */}
-        <div className="mb-4 flex items-center justify-between text-xs text-muted-foreground">
+        {/* Results Counter and View Mode Switcher */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
           <span>
             Showing <strong className="text-foreground">{filteredProjects.length}</strong> {filteredProjects.length === 1 ? 'project' : 'projects'} matching criteria
           </span>
-        </div>
 
-        <div className="flex gap-6">
-          {/* Filter Sidebar */}
-          <FilterSidebar
-            filters={filters}
-            onFiltersChange={handleFiltersChange}
-            availableTypes={availableTypes}
-            availableLocations={availableLocations}
-            availableCoBenefits={availableCoBenefits}
-            availableStandards={availableStandards}
-            priceRange={priceRange}
-            isOpen={isMobileFilterOpen}
-            onClose={() => setIsMobileFilterOpen(false)}
-          />
+          <div className="flex items-center gap-2">
+            <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                ▦ Grid View
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('map')}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  viewMode === 'map'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                🗺 Interactive Map
+              </button>
+            </div>
 
-          {/* Projects Grid */}
-          <div className="flex-1">
-            {filteredProjects.length === 0 ? (
-              <div className="text-center py-16 border rounded-xl bg-card">
-                <span className="text-4xl block mb-2">🌿</span>
-                <Text variant="h3" as="h2" className="mb-2 font-semibold">
-                  No projects match your filter combination
-                </Text>
-                <Text variant="muted" as="p" className="mb-4 text-sm max-w-md mx-auto">
-                  Try clearing or relaxing co-benefit, certification standard, or price filters to view more available projects.
-                </Text>
-                <Button onClick={handleResetFilters} stellar="primary">
-                  Reset All Filters
-                </Button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProjects.map((project) => (
-                  <ProjectCard key={project.id} project={project} />
-                ))}
-              </div>
-            )}
+            <Link href="/projects/map">
+              <Button variant="ghost" size="sm" className="text-xs text-primary hover:underline">
+                Fullscreen Map ↗
+              </Button>
+            </Link>
           </div>
         </div>
+
+        {viewMode === 'map' ? (
+          <div className="mb-8">
+            <OffsetProjectMapWrapper projects={mockCarbonProjects} height="650px" showFilters={true} />
+          </div>
+        ) : (
+          <div className="flex gap-6">
+            {/* Filter Sidebar */}
+            <FilterSidebar
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              availableTypes={availableTypes}
+              availableLocations={availableLocations}
+              availableCoBenefits={availableCoBenefits}
+              availableStandards={availableStandards}
+              priceRange={priceRange}
+              isOpen={isMobileFilterOpen}
+              onClose={() => setIsMobileFilterOpen(false)}
+            />
+
+            {/* Projects Grid */}
+            <div className="flex-1">
+              {filteredProjects.length === 0 ? (
+                <div className="text-center py-16 border rounded-xl bg-card">
+                  <span className="text-4xl block mb-2">🌿</span>
+                  <Text variant="h3" as="h2" className="mb-2 font-semibold">
+                    No projects match your filter combination
+                  </Text>
+                  <Text variant="muted" as="p" className="mb-4 text-sm max-w-md mx-auto">
+                    Try clearing or relaxing co-benefit, certification standard, or price filters to view more available projects.
+                  </Text>
+                  <Button onClick={handleResetFilters} stellar="primary">
+                    Reset All Filters
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredProjects.map((project) => (
+                    <ProjectCard key={project.id} project={project} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
