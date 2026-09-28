@@ -1,8 +1,8 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, Address,
-    BytesN, Env, Symbol,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
+    Address, BytesN, Env, Symbol,
 };
 
 #[contracterror]
@@ -29,7 +29,40 @@ pub enum CarbonCreditsError {
     InvalidThreshold = 12,
     /// The project does not clear its regional baseline by the required margin.
     AdditionalityNotMet = 13,
+    /// No retail lot exists for the supplied id.
+    LotNotFound = 14,
+    /// The retail lot was closed by its seller or is fully sold out.
+    LotNotActive = 15,
+    /// A retail purchase must be at least one full ton of CO₂.
+    BelowMinimumRetailPortion = 16,
+    /// The lot does not hold enough CO₂ left for the requested portion.
+    InsufficientLotOffsets = 17,
+    /// The retail rail has no payment token configured yet.
+    RetailNotConfigured = 18,
+    /// A lot must be a whole number of tons, and at least one ton.
+    InvalidLotSize = 19,
+    /// `price_per_ton` must be strictly positive.
+    InvalidPrice = 20,
+    /// Only the seller that opened a lot may close it.
+    Unauthorized = 21,
+    /// No soil measurement found for the specified plot.
+    PlotMeasurementNotFound = 22,
+    /// Invalid soil measurement data provided.
+    InvalidSoilData = 23,
+    /// Soil organic carbon did not improve above baseline.
+    NoSequestrationAboveBaseline = 24,
+    /// Soil bonus carbon credits were already awarded for this measurement.
+    BonusAlreadyAwarded = 25,
 }
+
+// ── Units ─────────────────────────────────────────────────────────────────────
+
+/// One metric ton of CO₂ in the gram unit used across the contract.
+pub const GRAMS_PER_TON: u64 = 1_000_000;
+
+/// Smallest portion a retail buyer may take: exactly one ton rather than the
+/// 100+-ton blocks institutional buyers normally have to take (issue #1366).
+pub const MIN_RETAIL_PORTION_GRAMS: u64 = GRAMS_PER_TON;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -94,6 +127,75 @@ pub struct AdditionalityVerdict {
     pub is_additional: bool,
 }
 
+/// A retail-sized offer carved out of a project's verified credit block.
+///
+/// Institutional buyers normally take carbon credits in 100+-ton blocks. A lot
+/// is opened for a whole number of tons and then sold down one ton at a time,
+/// so a retail buyer can take a 1-ton portion of a large project (issue #1366).
+///
+/// The underlying credits are escrowed: opening a lot deducts its grams from
+/// the seller's balance, and every purchase credits them to the buyer, who can
+/// then retire them with [`CarbonCredits::retire_offset`] like any other credit.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RetailLot {
+    pub id: u64,
+    /// Project the lot's credits were issued against.
+    pub project_id: Symbol,
+    /// Seller that opened (and may close) the lot.
+    pub seller: Address,
+    /// Grams of CO₂ the lot was opened with (a whole number of tons).
+    pub total: u64,
+    /// Grams of CO₂ still unsold.
+    pub remaining: u64,
+    /// Price of one whole ton, in payment-token base units.
+    pub price_per_ton: i128,
+    /// `false` once the seller closes the lot or the last portion is sold.
+    pub active: bool,
+    pub opened_at: u64,
+}
+
+/// Measured soil health and regenerative practices for an agricultural plot (issue #1386).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SoilHealthMeasurement {
+    pub plot_id: Symbol,
+    pub farmer: Address,
+    /// Baseline Soil Organic Carbon (SOC) in basis points (e.g. 150 = 1.50%).
+    pub baseline_soc_bps: u32,
+    /// Measured Soil Organic Carbon (SOC) in basis points (e.g. 235 = 2.35%).
+    pub measured_soc_bps: u32,
+    /// Soil microbial biomass in mg/kg (ppm).
+    pub microbial_biomass_ppm: u32,
+    /// Bulk density (g/cm³ scaled by 100, e.g. 125 = 1.25 g/cm³).
+    pub bulk_density_scaled: u32,
+    /// Regenerative practice score (0..=100) based on cover crops, no-till, crop rotation, compost.
+    pub practice_score: u32,
+    /// Plot size in acres.
+    pub acres: u32,
+    pub measured_at: u64,
+    pub verifier: Address,
+}
+
+/// Calculated score and bonus sequestration output for regenerative farming practices (issue #1386).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SoilHealthScore {
+    pub plot_id: Symbol,
+    pub farmer: Address,
+    /// Measured SOC minus baseline SOC (in basis points).
+    pub soc_gain_bps: i32,
+    /// Composite soil health improvement score (0..=100).
+    pub composite_score: u32,
+    /// Grams of CO₂ sequestered above baseline.
+    pub sequestration_above_baseline_grams: u64,
+    /// Awarded bonus carbon credits in grams CO₂.
+    pub bonus_credits_grams: u64,
+    /// Whether bonus credits have already been awarded into the farmer's balance.
+    pub bonus_awarded: bool,
+    pub scored_at: u64,
+}
+
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -108,6 +210,16 @@ enum DataKey {
     Project(Symbol),
     /// Minimum reduction (basis points of the baseline) required to qualify.
     MinReductionBps,
+    /// Payment token retail buyers settle portion purchases with.
+    RetailPaymentToken,
+    /// Retail lot, keyed by lot id.
+    RetailLot(u64),
+    /// Number of lots opened so far; also the id counter.
+    RetailLotCount,
+    /// Soil health measurement, keyed by plot id.
+    SoilMeasurement(Symbol),
+    /// Soil health calculated score, keyed by plot id.
+    SoilScore(Symbol),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -412,7 +524,244 @@ impl CarbonCredits {
         Self::accumulate_credit(env, sponsor, slug, tree_count, age_years);
     }
 
+    // ── Retail fractionalisation (issue #1366) ────────────────────────────────
+
+    /// Admin-only: set the token retail buyers pay with.
+    ///
+    /// Until this is called the retail rail is closed and every other retail
+    /// entry point panics with `RetailNotConfigured`.
+    pub fn configure_retail(env: Env, payment_token: Address) {
+        Self::require_admin(&env);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::RetailPaymentToken, &payment_token);
+
+        env.events().publish(
+            (symbol_short!("retail"), symbol_short!("token")),
+            payment_token,
+        );
+    }
+
+    /// Returns the token retail buyers pay with.
+    pub fn get_retail_payment_token(env: Env) -> Address {
+        Self::retail_payment_token(&env)
+    }
+
+    /// Seller-only: carve `grams` of owned credits out of a project's block and
+    /// offer them to retail buyers.
+    ///
+    /// `grams` must be a whole number of tons and at least one ton, so a large
+    /// block is offered as 1-ton portions instead of one 100+-ton chunk
+    /// (issue #1366). `price_per_ton` is quoted in payment-token base units.
+    ///
+    /// The credits are escrowed in the contract: they leave the seller's
+    /// balance now and are released to buyers as portions are purchased, or
+    /// returned by [`Self::close_retail_lot`].
+    ///
+    /// # Returns
+    /// The new lot id, queryable with [`Self::get_retail_lot`].
+    pub fn open_retail_lot(
+        env: Env,
+        seller: Address,
+        project_id: Symbol,
+        grams: u64,
+        price_per_ton: i128,
+    ) -> u64 {
+        seller.require_auth();
+        Self::retail_payment_token(&env); // the rail must be configured
+
+        if price_per_ton <= 0 {
+            panic_with_error!(&env, CarbonCreditsError::InvalidPrice);
+        }
+        if grams < MIN_RETAIL_PORTION_GRAMS || grams % GRAMS_PER_TON != 0 {
+            panic_with_error!(&env, CarbonCreditsError::InvalidLotSize);
+        }
+
+        // Escrow the credits out of the seller's balance.
+        let balance_key = DataKey::TotalOffset(seller.clone());
+        let balance: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0u64);
+        if grams > balance {
+            panic_with_error!(&env, CarbonCreditsError::InsufficientOffsets);
+        }
+        env.storage()
+            .persistent()
+            .set(&balance_key, &(balance - grams));
+
+        let id = Self::next_retail_lot_id(&env);
+        let lot = RetailLot {
+            id,
+            project_id: project_id.clone(),
+            seller: seller.clone(),
+            total: grams,
+            remaining: grams,
+            price_per_ton,
+            active: true,
+            opened_at: env.ledger().timestamp(),
+        };
+        env.storage()
+            .persistent()
+            .set(&DataKey::RetailLot(id), &lot);
+
+        env.events().publish(
+            (symbol_short!("retail"), symbol_short!("opened")),
+            (id, seller, project_id, grams, price_per_ton),
+        );
+
+        id
+    }
+
+    /// Buy `grams` of CO₂ out of a retail lot.
+    ///
+    /// At minimum one ton must be bought — that is the whole point of the
+    /// retail rail, so a buyer never has to take a 100+-ton block. The credits
+    /// are credited to the buyer's balance and can be retired with
+    /// [`Self::retire_offset`].
+    ///
+    /// Panics with `BelowMinimumRetailPortion` for sub-ton purchases,
+    /// `InsufficientLotOffsets` when the lot cannot cover the portion, and
+    /// `LotNotFound` / `LotNotActive` when the lot is gone or closed.
+    pub fn buy_retail_portion(env: Env, buyer: Address, lot_id: u64, grams: u64) {
+        buyer.require_auth();
+
+        let payment_token = Self::retail_payment_token(&env);
+        let lot_key = DataKey::RetailLot(lot_id);
+        let mut lot: RetailLot = env
+            .storage()
+            .persistent()
+            .get(&lot_key)
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::LotNotFound));
+
+        if !lot.active {
+            panic_with_error!(&env, CarbonCreditsError::LotNotActive);
+        }
+        if grams < MIN_RETAIL_PORTION_GRAMS {
+            panic_with_error!(&env, CarbonCreditsError::BelowMinimumRetailPortion);
+        }
+        if grams > lot.remaining {
+            panic_with_error!(&env, CarbonCreditsError::InsufficientLotOffsets);
+        }
+
+        let cost = Self::retail_portion_cost(grams, lot.price_per_ton);
+        if cost <= 0 {
+            panic_with_error!(&env, CarbonCreditsError::InvalidPrice);
+        }
+
+        // Buyer pays the seller directly; the credits move inside the contract.
+        token::Client::new(&env, &payment_token).transfer(&buyer, &lot.seller, &cost);
+
+        lot.remaining = lot
+            .remaining
+            .checked_sub(grams)
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::InsufficientLotOffsets));
+        if lot.remaining == 0 {
+            lot.active = false;
+        }
+        env.storage().persistent().set(&lot_key, &lot);
+
+        let balance_key = DataKey::TotalOffset(buyer.clone());
+        let balance: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0u64);
+        let credited = balance
+            .checked_add(grams)
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::InvalidAmount));
+        env.storage().persistent().set(&balance_key, &credited);
+
+        env.events().publish(
+            (symbol_short!("retail"), symbol_short!("bought")),
+            (lot_id, buyer, grams, lot.remaining, cost),
+        );
+    }
+
+    /// Seller-only: close a lot and return its unsold credits.
+    pub fn close_retail_lot(env: Env, seller: Address, lot_id: u64) {
+        seller.require_auth();
+
+        let lot_key = DataKey::RetailLot(lot_id);
+        let mut lot: RetailLot = env
+            .storage()
+            .persistent()
+            .get(&lot_key)
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::LotNotFound));
+
+        if !lot.active {
+            panic_with_error!(&env, CarbonCreditsError::LotNotActive);
+        }
+        if lot.seller != seller {
+            panic_with_error!(&env, CarbonCreditsError::Unauthorized);
+        }
+
+        let refund = lot.remaining;
+        lot.remaining = 0;
+        lot.active = false;
+        env.storage().persistent().set(&lot_key, &lot);
+
+        if refund > 0 {
+            let balance_key = DataKey::TotalOffset(seller.clone());
+            let balance: u64 = env.storage().persistent().get(&balance_key).unwrap_or(0u64);
+            let restored = balance
+                .checked_add(refund)
+                .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::InvalidAmount));
+            env.storage().persistent().set(&balance_key, &restored);
+        }
+
+        env.events().publish(
+            (symbol_short!("retail"), symbol_short!("closed")),
+            (lot_id, seller, refund),
+        );
+    }
+
+    /// Returns the lot record, or panics with `LotNotFound`.
+    pub fn get_retail_lot(env: Env, lot_id: u64) -> RetailLot {
+        env.storage()
+            .persistent()
+            .get(&DataKey::RetailLot(lot_id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::LotNotFound))
+    }
+
+    /// Returns how many lots have been opened (also the last assigned id).
+    pub fn retail_lot_count(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::RetailLotCount)
+            .unwrap_or(0u64)
+    }
+
+    /// View-only quote: what `grams` out of `lot_id` cost today.
+    pub fn quote_retail_portion(env: Env, lot_id: u64, grams: u64) -> i128 {
+        let lot = Self::get_retail_lot(env, lot_id);
+        Self::retail_portion_cost(grams, lot.price_per_ton)
+    }
+
     // ── internal ──────────────────────────────────────────────────────────────
+
+    /// Returns the configured retail payment token, or panics when the retail
+    /// rail has not been set up yet.
+    fn retail_payment_token(env: &Env) -> Address {
+        env.storage()
+            .instance()
+            .get(&DataKey::RetailPaymentToken)
+            .unwrap_or_else(|| panic_with_error!(env, CarbonCreditsError::RetailNotConfigured))
+    }
+
+    /// Allocates the next retail lot id (monotonically increasing, starting 1).
+    fn next_retail_lot_id(env: &Env) -> u64 {
+        let next: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RetailLotCount)
+            .unwrap_or(0u64)
+            + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::RetailLotCount, &next);
+        next
+    }
+
+    /// Cost of `grams` at `price_per_ton`, floored to whole payment units.
+    /// Exact for whole-ton portions, which is what the retail rail offers.
+    fn retail_portion_cost(grams: u64, price_per_ton: i128) -> i128 {
+        (grams as i128 * price_per_ton) / GRAMS_PER_TON as i128
+    }
 
     /// Require the stored admin's authorization and return the admin address.
     fn require_admin(env: &Env) -> Address {
@@ -449,6 +798,170 @@ impl CarbonCredits {
             (symbol_short!("credit"), symbol_short!("recorded")),
             (sponsor, delta),
         );
+    }
+
+    // ── Soil Health Scoring & Regenerative Agriculture Incentives (issue #1386) ──
+
+    /// Record a verified soil health and regenerative practice measurement for a farm plot.
+    ///
+    /// Verifier or admin must authorize. Validates soil parameters and stores measurement.
+    pub fn record_soil_measurement(
+        env: Env,
+        plot_id: Symbol,
+        farmer: Address,
+        baseline_soc_bps: u32,
+        measured_soc_bps: u32,
+        microbial_biomass_ppm: u32,
+        bulk_density_scaled: u32,
+        practice_score: u32,
+        acres: u32,
+        verifier: Address,
+    ) {
+        verifier.require_auth();
+
+        if acres == 0 || bulk_density_scaled == 0 || practice_score > 100 || measured_soc_bps == 0 {
+            panic_with_error!(&env, CarbonCreditsError::InvalidSoilData);
+        }
+
+        let measurement = SoilHealthMeasurement {
+            plot_id: plot_id.clone(),
+            farmer: farmer.clone(),
+            baseline_soc_bps,
+            measured_soc_bps,
+            microbial_biomass_ppm,
+            bulk_density_scaled,
+            practice_score,
+            acres,
+            measured_at: env.ledger().timestamp(),
+            verifier,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilMeasurement(plot_id.clone()), &measurement);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("measured")),
+            (plot_id, farmer, measured_soc_bps),
+        );
+    }
+
+    /// Calculate soil health improvement score and sequestration above baseline for regenerative farming.
+    ///
+    /// Evaluates:
+    /// - SOC (Soil Organic Carbon) increase above baseline (up to 40 pts)
+    /// - Adoption of regenerative practices (no-till, cover crop, crop rotation, compost) (up to 35 pts)
+    /// - Biological soil activity / microbial biomass (up to 25 pts)
+    ///
+    /// Calculates net CO₂ sequestration in grams and determines eligible bonus credits.
+    pub fn calculate_soil_health_score(env: Env, plot_id: Symbol) -> SoilHealthScore {
+        let m: SoilHealthMeasurement = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SoilMeasurement(plot_id.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound));
+
+        let soc_gain_bps = m.measured_soc_bps as i32 - m.baseline_soc_bps as i32;
+        if soc_gain_bps <= 0 {
+            panic_with_error!(&env, CarbonCreditsError::NoSequestrationAboveBaseline);
+        }
+
+        // Composite scoring (0..=100)
+        let soc_pts = ((soc_gain_bps as u32).min(100) * 40) / 100;
+        let practice_pts = (m.practice_score.min(100) * 35) / 100;
+        let microbial_pts = (m.microbial_biomass_ppm.min(500) * 25) / 500;
+        let composite_score = (soc_pts + practice_pts + microbial_pts).min(100);
+
+        // Sequestration calculation:
+        // Soil mass per acre (30cm layer) = 12,140 * bulk_density_scaled (kg)
+        // Total plot soil mass = soil_mass_per_acre * acres
+        let soil_mass_per_acre = 12_140u64 * m.bulk_density_scaled as u64;
+        let total_soil_mass_kg = soil_mass_per_acre * m.acres as u64;
+
+        // Carbon sequestered (kg) = total_soil_mass * (soc_gain_bps / 10,000)
+        let carbon_sequestered_kg = (total_soil_mass_kg * soc_gain_bps as u64) / 10_000;
+
+        // Grams CO₂ = carbon_kg * 44/12 * 1000 = (carbon_kg * 44 * 1000) / 12
+        let sequestration_above_baseline_grams =
+            (carbon_sequestered_kg * 44 * 1_000) / 12;
+
+        // Bonus credits scaled by composite regenerative score
+        let bonus_credits_grams =
+            (sequestration_above_baseline_grams * composite_score as u64) / 100;
+
+        let score = SoilHealthScore {
+            plot_id: plot_id.clone(),
+            farmer: m.farmer,
+            soc_gain_bps,
+            composite_score,
+            sequestration_above_baseline_grams,
+            bonus_credits_grams,
+            bonus_awarded: false,
+            scored_at: env.ledger().timestamp(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilScore(plot_id.clone()), &score);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("scored")),
+            (plot_id, composite_score, bonus_credits_grams),
+        );
+
+        score
+    }
+
+    /// Award bonus carbon credits to the farmer for verified soil sequestration above baseline.
+    ///
+    /// Credits are added directly to the farmer's `TotalOffset` balance.
+    pub fn award_soil_bonus_credits(env: Env, plot_id: Symbol) -> u64 {
+        Self::require_admin(&env);
+
+        let mut score: SoilHealthScore = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SoilScore(plot_id.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound));
+
+        if score.bonus_awarded {
+            panic_with_error!(&env, CarbonCreditsError::BonusAlreadyAwarded);
+        }
+
+        let bonus = score.bonus_credits_grams;
+        if bonus > 0 {
+            let key = DataKey::TotalOffset(score.farmer.clone());
+            let current: u64 = env.storage().persistent().get(&key).unwrap_or(0u64);
+            env.storage().persistent().set(&key, &(current + bonus));
+        }
+
+        score.bonus_awarded = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilScore(plot_id.clone()), &score);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("bon_awd")),
+            (plot_id, score.farmer, bonus),
+        );
+
+        bonus
+    }
+
+    /// Retrieve the soil health measurement for a plot.
+    pub fn get_soil_measurement(env: Env, plot_id: Symbol) -> SoilHealthMeasurement {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SoilMeasurement(plot_id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound))
+    }
+
+    /// Retrieve the soil health score and bonus credit status for a plot.
+    pub fn get_soil_health_score(env: Env, plot_id: Symbol) -> SoilHealthScore {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SoilScore(plot_id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound))
     }
 }
 
@@ -938,5 +1451,405 @@ mod tests {
 
         let sponsor = Address::generate(&env);
         client.record_verified_credit(&sponsor, &p, &slug, &5_u32, &10_u32);
+    }
+
+    // ── Retail fractionalisation (issue #1366) ───────────────────────────────
+
+    /// Registers a Stellar asset contract to act as the retail payment token.
+    fn payment_token(env: &Env, admin: &Address) -> Address {
+        env.register_stellar_asset_contract_v2(admin.clone())
+            .address()
+    }
+
+    fn mint(env: &Env, token_id: &Address, to: &Address, amount: i128) {
+        token::StellarAssetClient::new(env, token_id).mint(to, &amount);
+    }
+
+    fn pay_balance(env: &Env, token_id: &Address, of: &Address) -> i128 {
+        token::Client::new(env, token_id).balance(of)
+    }
+
+    /// Credits `holder` with exactly `tons` tons (1_000_000 g each): at this
+    /// rate and age one tree sequesters 10 × 10_000 × 10 = 1_000_000 g.
+    fn give_tons(env: &Env, client: &CarbonCreditsClient, holder: &Address, tons: u32) {
+        let slug = Symbol::new(env, "teak");
+        client.set_rate(&slug, &10_000_i128, &20_u32);
+        client.record_credit(holder, &slug, &tons, &10_u32);
+    }
+
+    fn retail_ctx() -> (Env, Address, CarbonCreditsClient<'static>, Address) {
+        let (env, admin, client) = setup();
+        let usdc = payment_token(&env, &admin);
+        client.configure_retail(&usdc);
+        (env, admin, client, usdc)
+    }
+
+    #[test]
+    fn test_configure_retail_sets_payment_token() {
+        let (_, _, client, usdc) = retail_ctx();
+        assert_eq!(client.get_retail_payment_token(), usdc);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #18)")]
+    fn test_get_retail_payment_token_before_configure_panics() {
+        let (_, _, client) = setup();
+        client.get_retail_payment_token();
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #18)")]
+    fn test_open_lot_before_configure_retail_panics() {
+        let (env, _, client) = setup();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 5);
+        client.open_retail_lot(
+            &seller,
+            &Symbol::new(&env, "proj1"),
+            &5_000_000_u64,
+            &10_i128,
+        );
+    }
+
+    #[test]
+    fn test_open_lot_escrows_seller_credits() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 100);
+        assert_eq!(client.total_offset_for_sponsor(&seller), 100_000_000);
+
+        let id = client.open_retail_lot(
+            &seller,
+            &Symbol::new(&env, "proj1"),
+            &100_000_000_u64,
+            &25_i128,
+        );
+
+        assert_eq!(id, 1);
+        assert_eq!(client.retail_lot_count(), 1);
+        // Escrowed: the seller no longer holds them, the lot does.
+        assert_eq!(client.total_offset_for_sponsor(&seller), 0);
+
+        let lot = client.get_retail_lot(&id);
+        assert_eq!(lot.id, 1);
+        assert_eq!(lot.seller, seller);
+        assert_eq!(lot.project_id, Symbol::new(&env, "proj1"));
+        assert_eq!(lot.total, 100_000_000);
+        assert_eq!(lot.remaining, 100_000_000);
+        assert_eq!(lot.price_per_ton, 25);
+        assert!(lot.active);
+    }
+
+    #[test]
+    fn test_lot_ids_increment() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+
+        let first =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &5_000_000_u64, &1_i128);
+        let second =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p2"), &5_000_000_u64, &1_i128);
+
+        assert_eq!(first, 1);
+        assert_eq!(second, 2);
+        assert_eq!(client.retail_lot_count(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #19)")]
+    fn test_lot_below_one_ton_rejected() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 5);
+
+        // One gram short of a ton.
+        client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &999_999_u64, &10_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #19)")]
+    fn test_lot_that_is_not_a_whole_number_of_tons_rejected() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 5);
+
+        client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &1_500_000_u64, &10_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #20)")]
+    fn test_lot_with_zero_price_rejected() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 5);
+
+        client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &5_000_000_u64, &0_i128);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #5)")]
+    fn test_lot_larger_than_seller_balance_rejected() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 3);
+
+        client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &4_000_000_u64, &10_i128);
+    }
+
+    /// The acceptance criterion for #1366: a 100-ton block is reachable one ton
+    /// at a time by a retail buyer.
+    #[test]
+    fn test_retail_buyer_takes_one_ton_from_a_hundred_ton_block() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 100);
+
+        let id = client.open_retail_lot(
+            &seller,
+            &Symbol::new(&env, "proj1"),
+            &100_000_000_u64,
+            &7_i128,
+        );
+        mint(&env, &usdc, &buyer, 7);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+
+        // The buyer owns exactly one ton and paid exactly one ton's price.
+        assert_eq!(client.total_offset_for_sponsor(&buyer), 1_000_000);
+        assert_eq!(pay_balance(&env, &usdc, &buyer), 0);
+        assert_eq!(pay_balance(&env, &usdc, &seller), 7);
+        assert_eq!(client.get_retail_lot(&id).remaining, 99_000_000);
+        assert!(client.get_retail_lot(&id).active);
+    }
+
+    #[test]
+    fn test_retail_buyer_can_take_a_fractional_ton_above_the_minimum() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &4_i128);
+        mint(&env, &usdc, &buyer, 6);
+
+        client.buy_retail_portion(&buyer, &id, &1_500_000_u64); // 1.5 tons
+
+        assert_eq!(client.total_offset_for_sponsor(&buyer), 1_500_000);
+        assert_eq!(pay_balance(&env, &usdc, &seller), 6);
+        assert_eq!(client.get_retail_lot(&id).remaining, 8_500_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #16)")]
+    fn test_sub_ton_purchase_rejected() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &4_i128);
+        mint(&env, &usdc, &buyer, 100);
+
+        // One gram short of the one-ton retail minimum.
+        client.buy_retail_portion(&buyer, &id, &999_999_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #16)")]
+    fn test_single_gram_purchase_rejected() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &4_i128);
+        mint(&env, &usdc, &buyer, 100);
+
+        client.buy_retail_portion(&buyer, &id, &1_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #17)")]
+    fn test_purchase_larger_than_lot_remaining_rejected() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &4_i128);
+        mint(&env, &usdc, &buyer, 1_000);
+
+        client.buy_retail_portion(&buyer, &id, &11_000_000_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_purchase_from_unknown_lot_panics() {
+        let (env, _, client, usdc) = retail_ctx();
+        let buyer = Address::generate(&env);
+        mint(&env, &usdc, &buyer, 100);
+
+        client.buy_retail_portion(&buyer, &42_u64, &1_000_000_u64);
+    }
+
+    #[test]
+    fn test_lot_deactivates_once_fully_sold() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 2);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &2_000_000_u64, &3_i128);
+        mint(&env, &usdc, &buyer, 6);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+        assert!(client.get_retail_lot(&id).active);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+        let sold_out = client.get_retail_lot(&id);
+        assert_eq!(sold_out.remaining, 0);
+        assert!(!sold_out.active);
+        assert_eq!(client.total_offset_for_sponsor(&buyer), 2_000_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn test_purchase_from_sold_out_lot_rejected() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 1);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &1_000_000_u64, &3_i128);
+        mint(&env, &usdc, &buyer, 6);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+    }
+
+    #[test]
+    fn test_quote_matches_the_charged_price() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &9_i128);
+        mint(&env, &usdc, &buyer, 27);
+
+        assert_eq!(client.quote_retail_portion(&id, &1_000_000_u64), 9);
+        assert_eq!(client.quote_retail_portion(&id, &3_000_000_u64), 27);
+
+        client.buy_retail_portion(&buyer, &id, &3_000_000_u64);
+        assert_eq!(pay_balance(&env, &usdc, &seller), 27);
+    }
+
+    /// Bought portions are ordinary credits: the retail buyer can retire them.
+    #[test]
+    fn test_bought_portion_can_be_retired() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 5);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &5_000_000_u64, &2_i128);
+        mint(&env, &usdc, &buyer, 2);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+        client.retire_offset(&buyer, &1_000_000_u64);
+
+        assert_eq!(client.total_offset_for_sponsor(&buyer), 0);
+        assert_eq!(client.total_retired_for_sponsor(&buyer), 1_000_000);
+    }
+
+    #[test]
+    fn test_close_lot_returns_unsold_credits_to_seller() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 10);
+        let id =
+            client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &10_000_000_u64, &2_i128);
+        mint(&env, &usdc, &buyer, 2);
+
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+        client.close_retail_lot(&seller, &id);
+
+        let lot = client.get_retail_lot(&id);
+        assert!(!lot.active);
+        assert_eq!(lot.remaining, 0);
+        // Seller keeps the sale proceeds and gets the unsold 9 tons back.
+        assert_eq!(client.total_offset_for_sponsor(&seller), 9_000_000);
+        assert_eq!(pay_balance(&env, &usdc, &seller), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn test_closing_a_lot_twice_rejected() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 4);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &4_000_000_u64, &2_i128);
+
+        client.close_retail_lot(&seller, &id);
+        client.close_retail_lot(&seller, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #21)")]
+    fn test_only_the_seller_may_close_a_lot() {
+        let (env, _, client, _) = retail_ctx();
+        let seller = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        give_tons(&env, &client, &seller, 4);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &4_000_000_u64, &2_i128);
+
+        client.close_retail_lot(&stranger, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #15)")]
+    fn test_purchase_from_closed_lot_rejected() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        let buyer = Address::generate(&env);
+        give_tons(&env, &client, &seller, 4);
+        let id = client.open_retail_lot(&seller, &Symbol::new(&env, "p1"), &4_000_000_u64, &2_i128);
+        mint(&env, &usdc, &buyer, 10);
+
+        client.close_retail_lot(&seller, &id);
+        client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #14)")]
+    fn test_get_unknown_lot_panics() {
+        let (_, _, client, _) = retail_ctx();
+        client.get_retail_lot(&7_u64);
+    }
+
+    #[test]
+    fn test_many_retail_buyers_share_one_large_block() {
+        let (env, _, client, usdc) = retail_ctx();
+        let seller = Address::generate(&env);
+        give_tons(&env, &client, &seller, 100);
+        let id = client.open_retail_lot(
+            &seller,
+            &Symbol::new(&env, "proj1"),
+            &100_000_000_u64,
+            &5_i128,
+        );
+
+        // Ten retail buyers each take the one-ton minimum.
+        for _ in 0..10 {
+            let buyer = Address::generate(&env);
+            mint(&env, &usdc, &buyer, 5);
+            client.buy_retail_portion(&buyer, &id, &1_000_000_u64);
+            assert_eq!(client.total_offset_for_sponsor(&buyer), 1_000_000);
+        }
+
+        let lot = client.get_retail_lot(&id);
+        assert_eq!(lot.remaining, 90_000_000);
+        assert!(lot.active);
+        assert_eq!(pay_balance(&env, &usdc, &seller), 50);
     }
 }
