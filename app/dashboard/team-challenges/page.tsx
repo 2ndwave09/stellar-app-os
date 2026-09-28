@@ -1,34 +1,28 @@
-// Copyright 2024 Farm-credit Contributors
-// Licensed under the Apache License, Version 2.0
+import type { Metadata } from 'next';
+import { TeamChallengesBoard } from '@/components/organisms/TeamChallenges/TeamChallengesBoard';
+import type { TeamChallengeEntry } from '@/lib/team-challenges/ranking';
 
-/**
- * Team Challenges Dashboard Page
- * Issue #1423: Corporate offset goals - team challenges
- */
+export const metadata: Metadata = {
+  title: 'Team Challenges | Farm-credit',
+  description:
+    'Corporate offset goals: employee teams compete on offset per employee, and the best ratio wins recognition.',
+};
 
-import { TeamChallengesDashboard } from '@/components/TeamChallengesDashboard';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+// v1 ships the surface with a deterministic sample board. When team activity is
+// wired through `app/api/challenges`, replace this with the fetched entries —
+// the board already ranks whatever `TeamChallengeEntry[]` it receives.
+const sampleTeams: TeamChallengeEntry[] = [
+  { teamId: 'field-ops', teamName: 'Field Ops', totalOffsetTonnes: 480, employeeCount: 24 },
+  { teamId: 'product', teamName: 'Product', totalOffsetTonnes: 315, employeeCount: 15 },
+  { teamId: 'finance', teamName: 'Finance', totalOffsetTonnes: 190, employeeCount: 8 },
+  { teamId: 'people', teamName: 'People & Culture', totalOffsetTonnes: 96, employeeCount: 12 },
+  { teamId: 'contractors', teamName: 'Contractors', totalOffsetTonnes: 140 },
+];
 
-export default async function TeamChallengesPage() {
-  const session = await getServerSession(authOptions);
-  
-  if (!session?.user?.companyId) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <div className="text-center">
-          <h2 className="text-xl font-bold mb-2">Access Denied</h2>
-          <p className="text-muted-foreground">
-            You must be part of a company to access team challenges.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
+export default function TeamChallengesPage() {
   return (
-    <div className="container mx-auto py-8">
-      <TeamChallengesDashboard companyId={session.user.companyId} />
-    </div>
+    <main className="container mx-auto px-4 py-8">
+      <TeamChallengesBoard teams={sampleTeams} />
+    </main>
   );
 }
