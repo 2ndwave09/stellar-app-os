@@ -10,6 +10,7 @@ export function useCreditPortfolio(publicKey: string | null) {
   const [credits, setCredits] = useState<OwnedCredit[]>([]);
   const [stats, setStats] = useState<PortfolioStats>({
     totalCredits: 0,
+    totalCost: 0,
     totalValue: 0,
     activeCredits: 0,
     retiredCredits: 0,
@@ -55,6 +56,7 @@ export function useCreditPortfolio(publicKey: string | null) {
           setCredits([]);
           setStats({
             totalCredits: 0,
+            totalCost: 0,
             totalValue: 0,
             activeCredits: 0,
             retiredCredits: 0,
@@ -121,6 +123,7 @@ export function useCreditPortfolio(publicKey: string | null) {
       setCredits(balances);
       setStats({
         totalCredits: balances.reduce((sum, c) => sum + c.quantity, 0),
+        totalCost: balances.reduce((sum, c) => sum + c.purchaseCost, 0),
         totalValue,
         activeCredits: activeCount,
         retiredCredits: retiredCount,
