@@ -5,6 +5,12 @@ export type ProjectType =
   | 'Sustainable Agriculture'
   | 'Other';
 
+/** Minimum quantity (in tonnes) required for a bulk-purchase order. */
+export const BULK_PURCHASE_MIN_QUANTITY = 100;
+
+/** Where to store corporate metadata for a bulk purchase. */
+export type MetadataStorageType = 'none' | 'on-chain' | 'ipfs';
+
 export type VerificationStatus =
   | 'Gold Standard'
   | 'Verra (VCS)'
@@ -41,4 +47,34 @@ export interface CreditSelectionState {
 export interface CreditSelectionProps {
   projects: CarbonProject[];
   onSelectionChange?: (selection: CreditSelectionState) => void;
+}
+
+// ─── Bulk purchase ────────────────────────────────────────────────────────────
+
+export interface CorporateMetadata {
+  companyName?: string;
+  registrationNumber?: string;
+  contactEmail?: string;
+  notes?: string;
+  initiativeDescription?: string;
+  initiativeUrl?: string;
+  storageType?: MetadataStorageType;
+}
+
+export interface BulkPurchaseOrder {
+  projectId: string;
+  quantity: number;
+  totalPrice: number;
+  buyerPublicKey: string;
+  network: 'testnet' | 'mainnet';
+  metadata?: CorporateMetadata;
+}
+
+export interface BulkPurchaseResult {
+  transactionXdr: string;
+  networkPassphrase: string;
+  fee: string;
+  sequence: string;
+  memoValue?: string;
+  ipfsCid?: string;
 }
