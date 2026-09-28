@@ -15,12 +15,16 @@ import {
 import { createDefaultFilters } from '@/lib/types/filters';
 import type { ProjectFilters } from '@/lib/types/filters';
 import { ProjectCard } from '@/components/molecules/ProjectCard/ProjectCard';
+import { OffsetProjectMapPanel } from '@/components/organisms/OffsetProjectMap/OffsetProjectMapPanel';
+
+type ViewMode = 'grid' | 'map';
 
 function ProjectsContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [filters, setFilters] = useState<ProjectFilters>(createDefaultFilters());
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>('grid');
 
   useEffect(() => {
     const urlFilters = parseFiltersFromUrl(searchParams);
@@ -105,54 +109,96 @@ function ProjectsContent() {
               found
             </Text>
           </div>
-          <Button
-            variant="outline"
-            size="lg"
-            onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)}
-            className="lg:hidden"
-            aria-label="Toggle filters"
-            aria-expanded={isMobileFilterOpen}
-          >
-            Filters
-          </Button>
-        </div>
 
-        <div className="flex gap-6">
-          {/* Filter Sidebar */}
-          <FilterSidebar
-            filters={filters}
-            onFiltersChange={handleFiltersChange}
-            availableTypes={availableTypes}
-            availableLocations={availableLocations}
-            availableCoBenefits={availableCoBenefits}
-            priceRange={priceRange}
-            isOpen={isMobileFilterOpen}
-            onClose={() => setIsMobileFilterOpen(false)}
-          />
+          <div className="flex items-center gap-2">
+            {/* View mode toggle */}
+            <div
+              className="inline-flex rounded-md border border-border bg-background p-1"
+              role="group"
+              aria-label="View mode"
+            >
+              <button
+                type="button"
+                className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === 'grid'
+                    ? 'bg-stellar-blue text-white'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setViewMode('grid')}
+                aria-pressed={viewMode === 'grid'}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                className={`rounded px-3 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === 'map'
+                    ? 'bg-stellar-blue text-white'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+                onClick={() => setViewMode('map')}
+                aria-pressed={viewMode === 'map'}
+              >
+                Map
+              </button>
+            </div>
 
-          {/* Projects Grid */}
-          <div className="flex-1">
-            {filteredProjects.length === 0 ? (
-              <div className="text-center py-12">
-                <Text variant="h3" as="h2" className="mb-2">
-                  No projects found
-                </Text>
-                <Text variant="muted" as="p" className="mb-4">
-                  Try adjusting your filters to see more results.
-                </Text>
-                <Button onClick={handleResetFilters} stellar="primary">
-                  Reset Filters
-                </Button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredProjects.map((project) => (
-                  <ProjectCard key={project.id} project={project} />
-                ))}
-              </div>
+            {viewMode === 'grid' && (
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={() => setIsMobileFilterOpen(!isMobileFilterOpen)}
+                className="lg:hidden"
+                aria-label="Toggle filters"
+                aria-expanded={isMobileFilterOpen}
+              >
+                Filters
+              </Button>
             )}
           </div>
         </div>
+
+        {/* Map view */}
+        {viewMode === 'map' ? (
+          <OffsetProjectMapPanel projects={mockCarbonProjects} />
+        ) : (
+          <div className="flex gap-6">
+            {/* Filter Sidebar */}
+            <FilterSidebar
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              availableTypes={availableTypes}
+              availableLocations={availableLocations}
+              availableCoBenefits={availableCoBenefits}
+              priceRange={priceRange}
+              isOpen={isMobileFilterOpen}
+              onClose={() => setIsMobileFilterOpen(false)}
+            />
+
+            {/* Projects Grid */}
+            <div className="flex-1">
+              {filteredProjects.length === 0 ? (
+                <div className="text-center py-12">
+                  <Text variant="h3" as="h2" className="mb-2">
+                    No projects found
+                  </Text>
+                  <Text variant="muted" as="p" className="mb-4">
+                    Try adjusting your filters to see more results.
+                  </Text>
+                  <Button onClick={handleResetFilters} stellar="primary">
+                    Reset Filters
+                  </Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {filteredProjects.map((project) => (
+                    <ProjectCard key={project.id} project={project} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
