@@ -494,6 +494,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "carbon-futures"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 21.7.7",
+]
+
+[[package]]
 name = "carbon-marketplace"
 version = "0.1.0"
 dependencies = [
@@ -993,6 +1000,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "farmer-escrow"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk 27.0.6",
+]
+
+[[package]]
 name = "farmer-registry"
 version = "0.1.0"
 dependencies = [
@@ -1015,13 +1029,6 @@ checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
  "rand_core 0.6.4",
  "subtle",
-]
-
-[[package]]
-name = "farmer-escrow"
-version = "0.1.0"
-dependencies = [
- "soroban-sdk 27.0.6",
 ]
 
 [[package]]
