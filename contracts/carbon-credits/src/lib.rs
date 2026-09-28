@@ -45,6 +45,14 @@ pub enum CarbonCreditsError {
     InvalidPrice = 20,
     /// Only the seller that opened a lot may close it.
     Unauthorized = 21,
+    /// No soil measurement found for the specified plot.
+    PlotMeasurementNotFound = 22,
+    /// Invalid soil measurement data provided.
+    InvalidSoilData = 23,
+    /// Soil organic carbon did not improve above baseline.
+    NoSequestrationAboveBaseline = 24,
+    /// Soil bonus carbon credits were already awarded for this measurement.
+    BonusAlreadyAwarded = 25,
 }
 
 // ── Units ─────────────────────────────────────────────────────────────────────
@@ -147,6 +155,47 @@ pub struct RetailLot {
     pub opened_at: u64,
 }
 
+/// Measured soil health and regenerative practices for an agricultural plot (issue #1386).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SoilHealthMeasurement {
+    pub plot_id: Symbol,
+    pub farmer: Address,
+    /// Baseline Soil Organic Carbon (SOC) in basis points (e.g. 150 = 1.50%).
+    pub baseline_soc_bps: u32,
+    /// Measured Soil Organic Carbon (SOC) in basis points (e.g. 235 = 2.35%).
+    pub measured_soc_bps: u32,
+    /// Soil microbial biomass in mg/kg (ppm).
+    pub microbial_biomass_ppm: u32,
+    /// Bulk density (g/cm³ scaled by 100, e.g. 125 = 1.25 g/cm³).
+    pub bulk_density_scaled: u32,
+    /// Regenerative practice score (0..=100) based on cover crops, no-till, crop rotation, compost.
+    pub practice_score: u32,
+    /// Plot size in acres.
+    pub acres: u32,
+    pub measured_at: u64,
+    pub verifier: Address,
+}
+
+/// Calculated score and bonus sequestration output for regenerative farming practices (issue #1386).
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct SoilHealthScore {
+    pub plot_id: Symbol,
+    pub farmer: Address,
+    /// Measured SOC minus baseline SOC (in basis points).
+    pub soc_gain_bps: i32,
+    /// Composite soil health improvement score (0..=100).
+    pub composite_score: u32,
+    /// Grams of CO₂ sequestered above baseline.
+    pub sequestration_above_baseline_grams: u64,
+    /// Awarded bonus carbon credits in grams CO₂.
+    pub bonus_credits_grams: u64,
+    /// Whether bonus credits have already been awarded into the farmer's balance.
+    pub bonus_awarded: bool,
+    pub scored_at: u64,
+}
+
 // ── Storage keys ──────────────────────────────────────────────────────────────
 
 #[contracttype]
@@ -167,6 +216,10 @@ enum DataKey {
     RetailLot(u64),
     /// Number of lots opened so far; also the id counter.
     RetailLotCount,
+    /// Soil health measurement, keyed by plot id.
+    SoilMeasurement(Symbol),
+    /// Soil health calculated score, keyed by plot id.
+    SoilScore(Symbol),
 }
 
 // ── Contract ──────────────────────────────────────────────────────────────────
@@ -745,6 +798,170 @@ impl CarbonCredits {
             (symbol_short!("credit"), symbol_short!("recorded")),
             (sponsor, delta),
         );
+    }
+
+    // ── Soil Health Scoring & Regenerative Agriculture Incentives (issue #1386) ──
+
+    /// Record a verified soil health and regenerative practice measurement for a farm plot.
+    ///
+    /// Verifier or admin must authorize. Validates soil parameters and stores measurement.
+    pub fn record_soil_measurement(
+        env: Env,
+        plot_id: Symbol,
+        farmer: Address,
+        baseline_soc_bps: u32,
+        measured_soc_bps: u32,
+        microbial_biomass_ppm: u32,
+        bulk_density_scaled: u32,
+        practice_score: u32,
+        acres: u32,
+        verifier: Address,
+    ) {
+        verifier.require_auth();
+
+        if acres == 0 || bulk_density_scaled == 0 || practice_score > 100 || measured_soc_bps == 0 {
+            panic_with_error!(&env, CarbonCreditsError::InvalidSoilData);
+        }
+
+        let measurement = SoilHealthMeasurement {
+            plot_id: plot_id.clone(),
+            farmer: farmer.clone(),
+            baseline_soc_bps,
+            measured_soc_bps,
+            microbial_biomass_ppm,
+            bulk_density_scaled,
+            practice_score,
+            acres,
+            measured_at: env.ledger().timestamp(),
+            verifier,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilMeasurement(plot_id.clone()), &measurement);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("measured")),
+            (plot_id, farmer, measured_soc_bps),
+        );
+    }
+
+    /// Calculate soil health improvement score and sequestration above baseline for regenerative farming.
+    ///
+    /// Evaluates:
+    /// - SOC (Soil Organic Carbon) increase above baseline (up to 40 pts)
+    /// - Adoption of regenerative practices (no-till, cover crop, crop rotation, compost) (up to 35 pts)
+    /// - Biological soil activity / microbial biomass (up to 25 pts)
+    ///
+    /// Calculates net CO₂ sequestration in grams and determines eligible bonus credits.
+    pub fn calculate_soil_health_score(env: Env, plot_id: Symbol) -> SoilHealthScore {
+        let m: SoilHealthMeasurement = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SoilMeasurement(plot_id.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound));
+
+        let soc_gain_bps = m.measured_soc_bps as i32 - m.baseline_soc_bps as i32;
+        if soc_gain_bps <= 0 {
+            panic_with_error!(&env, CarbonCreditsError::NoSequestrationAboveBaseline);
+        }
+
+        // Composite scoring (0..=100)
+        let soc_pts = ((soc_gain_bps as u32).min(100) * 40) / 100;
+        let practice_pts = (m.practice_score.min(100) * 35) / 100;
+        let microbial_pts = (m.microbial_biomass_ppm.min(500) * 25) / 500;
+        let composite_score = (soc_pts + practice_pts + microbial_pts).min(100);
+
+        // Sequestration calculation:
+        // Soil mass per acre (30cm layer) = 12,140 * bulk_density_scaled (kg)
+        // Total plot soil mass = soil_mass_per_acre * acres
+        let soil_mass_per_acre = 12_140u64 * m.bulk_density_scaled as u64;
+        let total_soil_mass_kg = soil_mass_per_acre * m.acres as u64;
+
+        // Carbon sequestered (kg) = total_soil_mass * (soc_gain_bps / 10,000)
+        let carbon_sequestered_kg = (total_soil_mass_kg * soc_gain_bps as u64) / 10_000;
+
+        // Grams CO₂ = carbon_kg * 44/12 * 1000 = (carbon_kg * 44 * 1000) / 12
+        let sequestration_above_baseline_grams =
+            (carbon_sequestered_kg * 44 * 1_000) / 12;
+
+        // Bonus credits scaled by composite regenerative score
+        let bonus_credits_grams =
+            (sequestration_above_baseline_grams * composite_score as u64) / 100;
+
+        let score = SoilHealthScore {
+            plot_id: plot_id.clone(),
+            farmer: m.farmer,
+            soc_gain_bps,
+            composite_score,
+            sequestration_above_baseline_grams,
+            bonus_credits_grams,
+            bonus_awarded: false,
+            scored_at: env.ledger().timestamp(),
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilScore(plot_id.clone()), &score);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("scored")),
+            (plot_id, composite_score, bonus_credits_grams),
+        );
+
+        score
+    }
+
+    /// Award bonus carbon credits to the farmer for verified soil sequestration above baseline.
+    ///
+    /// Credits are added directly to the farmer's `TotalOffset` balance.
+    pub fn award_soil_bonus_credits(env: Env, plot_id: Symbol) -> u64 {
+        Self::require_admin(&env);
+
+        let mut score: SoilHealthScore = env
+            .storage()
+            .persistent()
+            .get(&DataKey::SoilScore(plot_id.clone()))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound));
+
+        if score.bonus_awarded {
+            panic_with_error!(&env, CarbonCreditsError::BonusAlreadyAwarded);
+        }
+
+        let bonus = score.bonus_credits_grams;
+        if bonus > 0 {
+            let key = DataKey::TotalOffset(score.farmer.clone());
+            let current: u64 = env.storage().persistent().get(&key).unwrap_or(0u64);
+            env.storage().persistent().set(&key, &(current + bonus));
+        }
+
+        score.bonus_awarded = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::SoilScore(plot_id.clone()), &score);
+
+        env.events().publish(
+            (symbol_short!("soil"), symbol_short!("bon_awd")),
+            (plot_id, score.farmer, bonus),
+        );
+
+        bonus
+    }
+
+    /// Retrieve the soil health measurement for a plot.
+    pub fn get_soil_measurement(env: Env, plot_id: Symbol) -> SoilHealthMeasurement {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SoilMeasurement(plot_id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound))
+    }
+
+    /// Retrieve the soil health score and bonus credit status for a plot.
+    pub fn get_soil_health_score(env: Env, plot_id: Symbol) -> SoilHealthScore {
+        env.storage()
+            .persistent()
+            .get(&DataKey::SoilScore(plot_id))
+            .unwrap_or_else(|| panic_with_error!(&env, CarbonCreditsError::PlotMeasurementNotFound))
     }
 }
 
