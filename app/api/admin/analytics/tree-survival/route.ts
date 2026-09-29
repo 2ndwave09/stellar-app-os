@@ -4,6 +4,7 @@ import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
+import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
 
 export const runtime = 'nodejs';
 
@@ -27,6 +28,30 @@ export async function GET(request: Request): Promise<NextResponse> {
     const message = error instanceof Error ? error.message : 'Failed to generate tree analytics';
     const status = /must be|valid ISO|before or equal/.test(message) ? 400 : 500;
     console.error('[tree-survival-analytics]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * GET /api/admin/analytics/tree-survival/payment-methods
+ *
+ * Returns the supported farmer payment methods across XLM, USDC, and fiat
+ * currencies, including bank transfers, crypto wallets, and payment apps.
+ */
+export async function GET_PAYMENT_METHODS(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const filters = parseFarmerPaymentMethodFilters(new URL(request.url).searchParams);
+    const methods = await getFarmerPaymentMethods(getPool(), filters);
+    return NextResponse.json(methods, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to load farmer payment methods';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-payment-methods]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }

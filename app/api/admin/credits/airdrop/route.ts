@@ -34,6 +34,29 @@ interface FarmerPaymentResult {
 const SUPPORTED_CURRENCIES: PaymentCurrency[] = ['XLM', 'USDC', 'FIAT'];
 const SUPPORTED_METHODS: PaymentMethod[] = ['bank_transfer', 'crypto_wallet', 'payment_app'];
 
+// Method compatibility: which payment methods can settle each currency.
+const METHOD_CURRENCY_SUPPORT: Record<PaymentMethod, PaymentCurrency[]> = {
+  bank_transfer: ['FIAT'],
+  crypto_wallet: ['XLM', 'USDC'],
+  payment_app: ['FIAT', 'USDC'],
+};
+
+// Per-currency validation rules for the destination field.
+const DESTINATION_VALIDATORS: Record<PaymentCurrency, (destination: string) => string | null> = {
+  XLM: (destination) =>
+    /^G[A-Z2-7]{55}$/.test(destination)
+      ? null
+      : 'destination must be a valid Stellar public key (G...) for XLM payments',
+  USDC: (destination) =>
+    /^G[A-Z2-7]{55}$/.test(destination)
+      ? null
+      : 'destination must be a valid Stellar public key (G...) for USDC payments',
+  FIAT: (destination) =>
+    destination.trim().length >= 4
+      ? null
+      : 'destination must be a valid bank account or payment app handle for FIAT payments',
+};
+
 function validateFarmerPayment(payment: FarmerPaymentRequest): string | null {
   if (!payment.farmerId) return 'farmerId is required';
   if (!payment.amount || payment.amount <= 0) return 'amount must be greater than zero';
@@ -44,6 +67,15 @@ function validateFarmerPayment(payment: FarmerPaymentRequest): string | null {
     return `method must be one of: ${SUPPORTED_METHODS.join(', ')}`;
   }
   if (!payment.destination) return 'destination is required';
+
+  const supportedCurrencies = METHOD_CURRENCY_SUPPORT[payment.method];
+  if (!supportedCurrencies.includes(payment.currency)) {
+    return `method ${payment.method} does not support currency ${payment.currency}; supported: ${supportedCurrencies.join(', ')}`;
+  }
+
+  const destinationError = DESTINATION_VALIDATORS[payment.currency](payment.destination);
+  if (destinationError) return destinationError;
+
   return null;
 }
 

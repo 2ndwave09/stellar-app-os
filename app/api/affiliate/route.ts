@@ -7,6 +7,12 @@ export const runtime = 'nodejs';
 const SUPPORTED_CURRENCIES = ['XLM', 'USDC', 'FIAT'] as const;
 const SUPPORTED_METHODS = ['bank_transfer', 'crypto_wallet', 'payment_app'] as const;
 
+const CURRENCY_METHOD_MAP: Record<(typeof SUPPORTED_CURRENCIES)[number], readonly (typeof SUPPORTED_METHODS)[number][]> = {
+  XLM: ['crypto_wallet'],
+  USDC: ['crypto_wallet'],
+  FIAT: ['bank_transfer', 'payment_app'],
+};
+
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
 function getCorsHeaders(request: Request) {
@@ -88,6 +94,16 @@ export async function POST(request: Request) {
   if (!destination || typeof destination !== 'string') {
     return NextResponse.json(
       { error: 'destination is required' },
+      { status: 400, headers: corsHeaders },
+    );
+  }
+
+  const allowedMethods = CURRENCY_METHOD_MAP[currency as (typeof SUPPORTED_CURRENCIES)[number]];
+  if (!allowedMethods.includes(method as (typeof SUPPORTED_METHODS)[number])) {
+    return NextResponse.json(
+      {
+        error: `method '${method}' is not supported for currency '${currency}'. Allowed methods: ${allowedMethods.join(', ')}`,
+      },
       { status: 400, headers: corsHeaders },
     );
   }
