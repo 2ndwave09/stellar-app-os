@@ -10,6 +10,7 @@ members = [
     "escrow-milestone",
     "tree-escrow",
     "farmer-registry",
+    "farmer-escrow",
     "donation-escrow",
     "zk-location-verifier",
     "zk-verifier",
@@ -28,7 +29,6 @@ members = [
     "platform-governance",
     "nft-certificate",
     "subscription-sponsorship",
-    "nft-certificate",
     "sponsor-receipt",
     "carbon-marketplace",
     "carbon-dex",
@@ -37,6 +37,15 @@ members = [
     "species-catalog",
     "upgrade-timelock",
     "leaderboard",
+    "transparent-proxy",
+    "tree-retirement",
+    "staking-rewards",
+    "tree-genetics",
+    "carbon-price-oracle",
+    "community-offset-pool",
+    "atomic-swap",
+    "farmer-bonus-pool",
+    "carbon-fractionalization",
 ]
 resolver = "2"
 
