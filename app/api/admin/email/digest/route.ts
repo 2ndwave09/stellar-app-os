@@ -1,12 +1,26 @@
 import { NextResponse } from 'next/server';
 import { sendWeeklySponsorDigest, type WeeklySponsorDigestParams } from '@/lib/email/sendgrid';
 import { auditLog } from '@/lib/audit';
+import { processFarmerPayment, type FarmerPaymentRequest } from '@/lib/payments/farmer';
 
 export const runtime = 'nodejs';
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json() as { digests?: WeeklySponsorDigestParams[] };
+    const body = await request.json() as { digests?: WeeklySponsorDigestParams[]; payments?: FarmerPaymentRequest[] };
+    if (Array.isArray(body.payments)) {
+      const results = [];
+      for (const payment of body.payments) {
+        if (!payment.farmerId || !payment.amount || !payment.currency || !payment.method) {
+          await auditLog({ action: 'ADMIN_FARMER_PAYMENT_INVALID', details: { error: 'missing required fields', payment: { farmerId: payment.farmerId } } });
+          return NextResponse.json({ error: 'each payment requires farmerId, amount, currency, and method' }, { status: 400 });
+        }
+        const result = await processFarmerPayment(payment);
+        results.push(result);
+      }
+      await auditLog({ action: 'ADMIN_FARMER_PAYMENT_SUCCESS', details: { count: results.length } });
+      return NextResponse.json({ processed: results.length, results });
+    }
     if (!Array.isArray(body.digests)) {
       await auditLog({ action: 'ADMIN_SEND_SPONSOR_DIGEST_INVALID', details: { error: 'digests must be an array' } });
       return NextResponse.json({ error: 'digests must be an array' }, { status: 400 });

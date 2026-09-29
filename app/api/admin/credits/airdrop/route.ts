@@ -8,6 +8,70 @@ import type {
   AirdropRecipient,
 } from '@/lib/types/carbon';
 
+// Farmer payment processing (v1) - multi-currency support
+type PaymentCurrency = 'XLM' | 'USDC' | 'FIAT';
+type PaymentMethod = 'bank_transfer' | 'crypto_wallet' | 'payment_app';
+
+interface FarmerPaymentRequest {
+  farmerId: string;
+  amount: number;
+  currency: PaymentCurrency;
+  method: PaymentMethod;
+  destination: string;
+  memo?: string;
+}
+
+interface FarmerPaymentResult {
+  farmerId: string;
+  amount: number;
+  currency: PaymentCurrency;
+  method: PaymentMethod;
+  status: 'queued' | 'failed';
+  reference?: string;
+  error?: string;
+}
+
+const SUPPORTED_CURRENCIES: PaymentCurrency[] = ['XLM', 'USDC', 'FIAT'];
+const SUPPORTED_METHODS: PaymentMethod[] = ['bank_transfer', 'crypto_wallet', 'payment_app'];
+
+function validateFarmerPayment(payment: FarmerPaymentRequest): string | null {
+  if (!payment.farmerId) return 'farmerId is required';
+  if (!payment.amount || payment.amount <= 0) return 'amount must be greater than zero';
+  if (!SUPPORTED_CURRENCIES.includes(payment.currency)) {
+    return `currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`;
+  }
+  if (!SUPPORTED_METHODS.includes(payment.method)) {
+    return `method must be one of: ${SUPPORTED_METHODS.join(', ')}`;
+  }
+  if (!payment.destination) return 'destination is required';
+  return null;
+}
+
+function processFarmerPayments(payments: FarmerPaymentRequest[]): FarmerPaymentResult[] {
+  return payments.map((payment) => {
+    const validationError = validateFarmerPayment(payment);
+    if (validationError) {
+      return {
+        farmerId: payment.farmerId,
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+        status: 'failed' as const,
+        error: validationError,
+      };
+    }
+    // TODO: replace with real payment rail integration (Stellar for XLM/USDC, fiat provider for FIAT)
+    return {
+      farmerId: payment.farmerId,
+      amount: payment.amount,
+      currency: payment.currency,
+      method: payment.method,
+      status: 'queued' as const,
+      reference: `pay_${payment.farmerId}_${Date.now()}`,
+    };
+  });
+}
+
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX_REQUESTS = 100; // per window
@@ -230,6 +294,56 @@ export async function POST(request: Request) {
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Airdrop failed';
     logAudit('admin.airdrop.execute', { status: 'error', message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  if (!(await isAdminRequest())) {
+    logAudit('admin.farmer_payments.process', { status: 'denied' });
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const rateLimitInspection = enforceRateLimit(request);
+  if (rateLimitInspection) {
+    logAudit('admin.farmer_payments.process', {
+      status: 'rate_limited',
+      keys: getClientKeys(request),
+    });
+    return rateLimitInspection;
+  }
+
+  try {
+    const body = (await request.json()) as { payments?: FarmerPaymentRequest[] };
+    const payments = body.payments ?? [];
+
+    logAudit('admin.farmer_payments.process', {
+      status: 'started',
+      paymentCount: payments.length,
+    });
+
+    if (!Array.isArray(payments) || payments.length === 0) {
+      logAudit('admin.farmer_payments.process', { status: 'no_payments' });
+      return NextResponse.json(
+        { error: 'payments must be a non-empty array' },
+        { status: 400 }
+      );
+    }
+
+    const results = processFarmerPayments(payments);
+    const queued = results.filter((r) => r.status === 'queued').length;
+    const failed = results.filter((r) => r.status === 'failed').length;
+
+    logAudit('admin.farmer_payments.process', {
+      status: 'success',
+      queued,
+      failed,
+    });
+
+    return NextResponse.json({ totalQueued: queued, totalFailed: failed, results });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Farmer payment processing failed';
+    logAudit('admin.farmer_payments.process', { status: 'error', message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

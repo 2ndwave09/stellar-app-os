@@ -21,11 +21,11 @@ export const dynamic = 'force-dynamic';
  *   to         - filter cohorts up to this month (YYYY-MM)
  *   max_periods - max period offsets to include (default 12)
  *   wallet     - if provided, returns a single sponsor's retention summary instead
- *   payment_method - optional filter by payment method (e.g. 'xlm' for Stellar)
+ *   payment_method - optional filter by payment method (e.g. 'xlm' for Stellar, 'usdc', 'bank', 'fiat')
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const wallet = url.searchParams.get('wallet')?.trim() ?? null;
+  const wallet = url.searchParams.get('wallet'?.trim() ?? null;
   const paymentMethod = url.searchParams.get('payment_method') ?? undefined;
   const action = wallet ? 'view_sponsor_retention' : 'view_cohort_retention';
 

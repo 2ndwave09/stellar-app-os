@@ -3,6 +3,7 @@ import { getPool } from '@/lib/db/client';
 import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
+import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +27,30 @@ export async function GET(request: Request): Promise<NextResponse> {
     const message = error instanceof Error ? error.message : 'Failed to generate tree analytics';
     const status = /must be|valid ISO|before or equal/.test(message) ? 400 : 500;
     console.error('[tree-survival-analytics]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * PUT /api/admin/analytics/tree-survival
+ *
+ * Processes a farmer payment in XLM, USDC, or fiat currency via bank transfer,
+ * crypto wallet, or payment app.
+ */
+export async function PUT(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseFarmerPaymentInput(await request.json());
+    const result = await processFarmerPayment(getPool(), input);
+    return NextResponse.json(result, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to process farmer payment';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-payment]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }

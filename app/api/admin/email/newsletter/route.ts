@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { sendSegmentedNewsletter, type NewsletterRecipient } from '@/lib/email/sendgrid';
+import { processFarmerPayments, type PaymentRequest } from '@/lib/payments/farmer-payments';
 import { auditLog } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -15,6 +16,7 @@ export async function POST(request: Request) {
       subject?: string;
       message?: string;
       recipients?: NewsletterRecipient[];
+      payments?: PaymentRequest[];
     };
     if (!body.subject?.trim() || !body.message?.trim() || !Array.isArray(body.recipients)) {
       await auditLog('admin.newsletter.invalid_request', { adminEmail, error: 'Missing required fields' });
@@ -29,5 +31,23 @@ export async function POST(request: Request) {
   } catch (error) {
     await auditLog('admin.newsletter.error', { adminEmail, error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json({ error: 'Invalid newsletter request' }, { status: 400 });
+  }
+}
+
+export async function PUT(request: Request) {
+  const session = await getServerSession();
+  const adminEmail = session?.user?.email ?? 'unknown';
+  try {
+    const body = await request.json() as { payments?: PaymentRequest[] };
+    if (!Array.isArray(body.payments) || body.payments.length === 0) {
+      await auditLog('admin.payments.invalid_request', { adminEmail, error: 'Missing payments' });
+      return NextResponse.json({ error: 'payments are required' }, { status: 400 });
+    }
+    const results = await processFarmerPayments(body.payments);
+    await auditLog('admin.payments.processed', { adminEmail, paymentCount: body.payments.length, results });
+    return NextResponse.json({ results });
+  } catch (error) {
+    await auditLog('admin.payments.error', { adminEmail, error: error instanceof Error ? error.message : 'Unknown error' });
+    return NextResponse.json({ error: 'Invalid payment request' }, { status: 400 });
   }
 }
