@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
  * Returns the sponsor cohort retention matrix.
  *
  * Query params:
- *   from      - filter cohorts from this month (YYYY-MM)
+ *   from       - filter cohorts from this month (YYYY-MM)
  *   to         - filter cohorts up to this month (YYYY-MM)
  *   max_periods - max period offsets to include (default 12)
  *   wallet     - if provided, returns a single sponsor's retention summary instead
@@ -34,21 +34,6 @@ export async function GET(request: Request) {
       const summary = await getSponsorRetentionSummary(getPool(), wallet);
       if (!summary) {
         await logAuditEvent(request, action, { wallet, status: 'not_found' });
- *   from       \u2014 filter cohorts from this month (YYYY-MM)
- *   to         \u2014 filter cohorts up to this month (YYYY-MM)
- *   max_periods \u2014 max period offsets to include (default 12)
- *   wallet     \u2014 if provided, returns a single sponsor's retention summary instead
- *   payment_method \u2014 optional filter by payment method (e.g. 'xlm' for Stellar)
- */
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const wallet = url.searchParams.get('wallet');
-  const paymentMethod = url.searchParams.get('payment_method') ?? undefined;
-
-  try {
-    if (wallet) {
-      const summary = await getSponsorRetentionSummary(getPool(), wallet.trim());
-      if (!summary) {
         return NextResponse.json(
           { error: 'No cohort data found for this wallet' },
           { status: 404 }
@@ -84,21 +69,6 @@ export async function GET(request: Request) {
 }
 
 /**
- * POST /api/admin/analytics/sponsor-cohort
- *
- * Trigger a cohort retention refresh (recomputes the snapshot table).
- * Should be called by a monthly cron job or on-demand.
- */
-export async function POST(request: Request) {
-  const action = 'refresh_cohort_retention';
-  try {
-    const result = await refreshCohortRetention(getPool());
-    await logAuditEvent(request, action, {
-      cohorts_processed: result.cohorts_processed,
-      rows_upserted: result.rows_upserted,
-      status: 'success',
-    });
-/***
  * Generates IRS 1099 forms for sponsors with >$20k annual sponsorships.
  * This is a placeholder implementation that returns the list of eligible sponsors.
  * In production, this should generate actual PDF forms and store them securely.
@@ -117,7 +87,14 @@ async function generate1099Forms(pool: any) {
     HAVING SUM(sp.amount) > 20000
   `);
   const sponsors = result.rows;
-  return sponsors.map((sponsor: any) => ({ sponsor_id, name, email, total_annual: Number(sponsor.total_annual), tax_form: '1099', generated_at: new Date().toISOString() }));
+  return sponsors.map((sponsor: any) => ({
+    sponsor_id: sponsor.sponsor_id,
+    name: sponsor.name,
+    email: sponsor.email,
+    total_annual: Number(sponsor.total_annual),
+    tax_form: '1099',
+    generated_at: new Date().toISOString(),
+  }));
 }
 
 /**
@@ -137,6 +114,10 @@ export async function POST(request: Request) {
   try {
     if (action === 'generate_1099') {
       const forms = await generate1099Forms(getPool());
+      await logAuditEvent(request, 'generate_1099', {
+        forms_generated: forms.length,
+        status: 'success',
+      });
       return NextResponse.json({
         success: true,
         forms_generated: forms.length,
@@ -145,6 +126,11 @@ export async function POST(request: Request) {
     }
 
     const result = await refreshCohortRetention(getPool());
+    await logAuditEvent(request, 'refresh_cohort_retention', {
+      cohorts_processed: result.cohorts_processed,
+      rows_upserted: result.rows_upserted,
+      status: 'success',
+    });
     return NextResponse.json({
       success: true,
       cohorts_processed: result.cohorts_processed,
@@ -152,9 +138,9 @@ export async function POST(request: Request) {
       generated_at: new Date().toISOString(),
     });
   } catch (error) {
-    await logAuditEvent(request, action, { status: 'error', error: (error as Error).message });
-    console.error('[sponsor-cohort] POST refresh error', error);
-    return NextResponse.json({ error: 'Failed to refresh cohort retention data' }, { status: 500 });
+    await logAuditEvent(request, action ?? 'refresh_cohort_retention', { status: 'error', error: (error as Error).message });
+    console.error('[sponsor-cohort] POST error', error);
+    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
 
@@ -163,13 +149,11 @@ async function logAuditEvent(request: Request, action: string, details: Record<s
     const pool = getPool();
     const actor = request.headers.get('x-admin-user') || request.headers.get('x-user-id') || 'unknown';
     await pool.query(
-      `InsERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
+      `INSERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
        VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())`,
       [actor, action, JSON.stringify(details)]
     );
   } catch (err) {
     console.error('[audit] Failed to write audit log:', err);
-    console.error('[sponsor-cohort] POST error', error);
-    return NextResponse.json({ error: 'Failed to process request' }, { status: 500 });
   }
 }
