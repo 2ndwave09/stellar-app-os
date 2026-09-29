@@ -12,6 +12,7 @@ import {
   PlusCircle,
   FileText,
   Trophy,
+  Code2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/molecules/Card';
 import { Button } from '@/components/atoms/Button';
@@ -77,6 +78,13 @@ export function CorporateDashboard() {
           >
             <Trophy className="h-4 w-4" />
             Team challenges
+          </Link>
+          <Link
+            href="/dashboard/embeds"
+            className="inline-flex items-center gap-2 rounded-md border border-white/10 px-4 py-2 text-sm font-medium hover:bg-white/5"
+          >
+            <Code2 className="h-4 w-4" />
+            Carbon embed
           </Link>
           <Button
             onClick={handleExportEsg}
