@@ -35,6 +35,9 @@ members = [
     "species-catalog",
     "upgrade-timelock",
     "leaderboard",
+    "additionality-verifier",
+    "farmer-escrow",
+    "cross-chain-settlement",
 ]
 resolver = "2"
 
