@@ -32,6 +32,7 @@ members = [
     "sponsor-receipt",
     "carbon-marketplace",
     "carbon-dex",
+    "carbon-insurance",
     "tree-registry",
     "verifier-staking",
     "species-catalog",
