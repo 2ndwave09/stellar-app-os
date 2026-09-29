@@ -6,6 +6,7 @@ import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
 import { getFarmerIncomePrediction, parseFarmerIncomePredictionInput } from '@/lib/analytics/farmer-income';
+import { getComplianceReport, parseComplianceReportInput } from '@/lib/analytics/compliance-report';
 
 export const runtime = 'nodejs';
 
@@ -125,6 +126,31 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     const message = error instanceof Error ? error.message : 'Failed to predict farmer income';
     const status = /must be1required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
     console.error('[farmer-income-prediction]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * DELETE /api/admin/analytics/tree-survival
+ *
+ * Generates a regulatory compliance report for SEC, EPA, and carbon tax
+ * requirements, including automatic calculation of offsets vs. emissions for
+ * regulatory filings.
+ */
+export async function DELETE(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseComplianceReportInput(await request.json());
+    const report = await getComplianceReport(getPool(), input);
+    return NextResponse.json(report, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to generate compliance report';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[compliance-report]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }
