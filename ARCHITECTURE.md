@@ -56,7 +56,7 @@ flowchart TB
         subgraph Contracts["Smart Contracts Ecosystem (Rust / WASM)"]
             ESC["🔒 Escrow & Settlement<br/>(escrow, tree-escrow, escrow-milestone, donation-escrow, naira-payout)"]
             REG["🌳 Tree & Planter Registries<br/>(tree-registry, tree-token, tree-genetics, planter-registry, planting-bond)"]
-            CARB["📉 Carbon Credits & DEX<br/>(carbon-credits, carbon-marketplace, carbon-dex, carbon-price-oracle)"]
+            CARB["📉 Carbon Credits & DEX<br/>(carbon-credits, carbon-marketplace, carbon-dex, carbon-price-oracle, soil-health)"]
             ZKC["🛡️ Privacy & Zero-Knowledge<br/>(zk-verifier, zk-location-verifier, nullifier-registry, aggregate-verifier)"]
             GOVC["🏛️ Governance & Security<br/>(platform-governance, species-voting, treasury, upgrade-timelock, admin-controls)"]
         end
@@ -173,6 +173,36 @@ sequenceDiagram
 
 ---
 
+### Soil Health Scoring & Regenerative Agriculture Incentives (v1)
+
+The `soil-health` contract extends the carbon credit ecosystem by scoring soil health improvements from regenerative farming practices and awarding bonus carbon credits for soil organic carbon (SOC) sequestration above a per-plot baseline.
+
+**Scoring Model (v1):**
+
+| Practice / Indicator | Weight | Description |
+| :--- | :--- | :--- |
+| **Cover Cropping** | 20% | Continuous living root coverage between cash crops |
+| **No-Till / Reduced Tillage** | 25% | Minimizes soil disturbance and aggregate breakdown |
+| **Crop Rotation Diversity** | 15% | Multi-species rotation reduces pest pressure & builds SOC |
+| **Compost / Organic Amendments** | 20% | Adds stable carbon and microbial biomass |
+| **Agroforestry / Silvopasture** | 10% | Integrated trees on working lands |
+| **Grazing Management** | 10% | Rotational / adaptive multi-paddock grazing |
+
+**On-Chain Flow:**
+
+1. Planter submits a `SoilHealthRecord` (plot geohash, practice flags, SOC sample ppm, IPFS CID of lab report).
+2. `soil-health` computes a weighted `health_score` (0–100) and compares sampled SOC against the plot's registered `baseline_soc`.
+3. If `soc_delta > 0`, bonus credits are minted via `carbon-credits` proportional to `soc_delta * area_ha * bonus_multiplier`.
+4. `SoilHealthImproved` and `BonusCreditsMinted` events are emitted for the indexer.
+
+**Baseline & Anti-Gaming:**
+
+- Baselines are set at plot registration and can only be revised via `platform-governance` proposals.
+- SOC samples must be attested by an approved verifier (see `planter-registry` verifier roles).
+- A rolling 12-month cooldown prevents double-counting of the same SOC delta.
+
+---
+
 ## 4. References & Documentation Links
 
 - **Full C4 Model Specification:** [docs/C4_ARCHITECTURE.md](file:///docs/C4_ARCHITECTURE.md)
@@ -181,3 +211,4 @@ sequenceDiagram
 - **API & OpenAPI Specification:** [docs/openapi.yaml](file:///docs/openapi.yaml)
 - **Zero-Knowledge Circuits & Privacy Guide:** [ZK_CIRCUITS_DOCUMENTATION.md](file:///ZK_CIRCUITS_DOCUMENTATION.md)
 - **AWS Disaster Recovery & Backup Plan:** [docs/DISASTER_RECOVERY.md](file:///docs/DISASTER_RECOVERY.md)
+- **Soil Health Scoring Specification:** [docs/SOIL_HEALTH.md](file:///docs/SOIL_HEALTH.md)
