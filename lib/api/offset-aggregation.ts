@@ -1,5 +1,5 @@
 /**
- * Offset aggregation API — Issue #1426
+ * Offset aggregation API — Issue #1302 / #1426
  *
  * Aggregates a portfolio manager's carbon positions and retirements across the
  * data sources this repository already has into a single view: portfolio
