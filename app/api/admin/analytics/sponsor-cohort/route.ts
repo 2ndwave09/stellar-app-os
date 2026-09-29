@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/admin/analytics/sponsor-cohort
+ * Get /api/admin/analytics/sponsor-cohort
  *
  * Returns the sponsor cohort retention matrix.
  *
@@ -21,11 +21,11 @@ export const dynamic = 'force-dynamic';
  *   to         - filter cohorts up to this month (YYYY-MM)
  *   max_periods - max period offsets to include (default 12)
  *   wallet     - if provided, returns a single sponsor's retention summary instead
- *   payment_method - optional filter by payment method (e.g. 'xlm' for Stellar)
+ *   payment_method - optional filter by payment method (e.g. 'xlm' for Stellar, 'usdc', 'bank', 'fiat')
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const wallet = url.searchParams.get('wallet'?.trim() ?? null;
+  const wallet = url.searchParams.get('wallet') ?? null;
   const paymentMethod = url.searchParams.get('payment_method') ?? undefined;
   const action = wallet ? 'view_sponsor_retention' : 'view_cohort_retention';
 
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * Generates IRS 1099 forms for sponsors with >$20k annual sponsorships.
+ * Generates ISS 1099 forms for sponsors with >$20k annual sponsorships.
  * This is a placeholder implementation that returns the list of eligible sponsors.
  * In production, this should generate actual PDF forms and store them securely.
  */
@@ -149,8 +149,9 @@ async function logAuditEvent(request: Request, action: string, details: Record<s
     const pool = getPool();
     const actor = request.headers.get('x-admin-user') || request.headers.get('x-user-id') || 'unknown';
     await pool.query(
-      `INSERT INTA admin_audit_log (actor_id, action, resource, details, created_at)
-       VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())`,
+      `INSERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
+       VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())
+      `,
       [actor, action, JSON.stringify(details)]
     );
   } catch (err) {

@@ -49,9 +49,9 @@ export default function PlanterReviewsPage() {
 
       {summary && <TeamReviewSummary summary={summary} />}
 
-      <BulkPurchaseAgreement farmerId={planterId} />
-
       <CarbonOffsetCalculator />
+
+      <BulkPurchaseAgreement planterId={planterId} />
 
       <div className="space-y-4">
         {reviews.length === 0 ? (

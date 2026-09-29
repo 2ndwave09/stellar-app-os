@@ -3,7 +3,10 @@ import { getPool } from '@/lib/db/client';
 import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
-import { getBulkPurchaseAgreements, parseBulkPurchaseFilters, createBulkPurchaseAgreement, parseBulkPurchaseInput } from '@/lib/marketplace/bulk-purchase';
+import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
+import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
+import { getFarmerIncomePrediction, parseFarmerIncomePredictionInput } from '@/lib/analytics/farmer-income';
+import { createBulkPurchaseAgreement, parseBulkPurchaseInput } from '@/lib/marketplace/bulk-purchase';
 
 export const runtime = 'nodejs';
 
@@ -32,25 +35,49 @@ export async function GET(request: Request): Promise<NextResponse> {
 }
 
 /**
- * GET /api/admin/analytics/tree-survival?bulk=true
+ * GET /api/admin/analytics/tree-survival/payment-methods
  *
- * Returns bulk purchase agreements with negotiated volume discount tiers
- * for corporate buyers purchasing 100+ ton batches from farmers.
+ * Returns the supported farmer payment methods across XLM, USDC, and fiat
+ * currencies, including bank transfers, crypto wallets, and payment apps.
  */
-export async function GET_BULK(request: Request): Promise<NextResponse> {
+export async function GET_PAYMENT_METHODS(request: Request): Promise<NextResponse> {
   if (!(await isAdminRequest())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   try {
-    const filters = parseBulkPurchaseFilters(new URL(request.url).searchParams);
-    const agreements = await getBulkPurchaseAgreements(getPool(), filters);
-    return NextResponse.json(agreements, {
+    const filters = parseFarmerPaymentMethodFilters(new URL(request.url).searchParams);
+    const methods = await getFarmerPaymentMethods(getPool(), filters);
+    return NextResponse.json(methods, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to fetch bulk purchase agreements';
-    const status = /must be|valid ISO|before or equal|100\+ ton/.test(message) ? 400 : 500;
-    console.error('[bulk-purchase-agreements]', error);
+    const message = error instanceof Error ? error.message : 'Failed to load farmer payment methods';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-payment-methods]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * PUT /api/admin/analytics/tree-survival
+ *
+ * Processes a farmer payment in XLM, USDC, or fiat currency via bank transfer,
+ * crypto wallet, or payment app.
+ */
+export async function PUT(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseFarmerPaymentInput(await request.json());
+    const result = await processFarmerPayment(getPool(), input);
+    return NextResponse.json(result, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to process farmer payment';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-payment]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }
@@ -80,12 +107,36 @@ export async function POST(request: Request): Promise<NextResponse> {
 }
 
 /**
- * POST /api/admin/analytics/tree-survival?bulk=true
+ * PATCH /api/admin/analytics/tree-survival
  *
- * Creates a bulk purchase agreement between a corporate buyer and a farmer
- * for 100+ ton batches at negotiated volume discount rates.
+ * Predicts potential farmer income from a carbon project based on land size,
+ * location, practice type, and historical carbon prices.
  */
-export async function POST_BULK(request: Request): Promise<NextResponse> {
+export async function PATCH(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseFarmerIncomePredictionInput(await request.json());
+    const prediction = await getFarmerIncomePrediction(getPool(), input);
+    return NextResponse.json(prediction, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to predict farmer income';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-income-prediction]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * DELETE /api/admin/analytics/tree-survival
+ *
+ * Creates a bulk purchase agreement between a corporate buyer and farmers for
+ * 100+ metric ton batches at negotiated volume-discounted rates.
+ */
+export async function DELETE(request: Request): Promise<NextResponse> {
   if (!(await isAdminRequest())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -97,8 +148,8 @@ export async function POST_BULK(request: Request): Promise<NextResponse> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to create bulk purchase agreement';
-    const status = /must be|required|invalid|non-negative|100\+ ton/.test(message) ? 400 : 500;
-    console.error('[bulk-purchase-agreement-create]', error);
+    const status = /must be|required|invalid|unsupported|non-negative|at least/.test(message) ? 400 : 500;
+    console.error('[bulk-purchase]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }
