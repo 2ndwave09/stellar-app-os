@@ -5,6 +5,7 @@ import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tre
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
+import { getFarmerIncomePrediction, parseFarmerIncomePredictionInput } from '@/lib/analytics/farmer-income';
 
 export const runtime = 'nodejs';
 
@@ -57,7 +58,7 @@ export async function GET_PAYMENT_METHODS(request: Request): Promise<NextRespons
 }
 
 /**
- * PUT /api/admin/analytics/tree-survival
+ * PUT -> /api/admin/analytics/tree-survival
  *
  * Processes a farmer payment in XLM, USDC, or fiat currency via bank transfer,
  * crypto wallet, or payment app.
@@ -100,6 +101,30 @@ export async function POST(request: Request): Promise<NextResponse> {
     const message = error instanceof Error ? error.message : 'Failed to estimate carbon offset';
     const status = /must be|required|invalid|non-negative/.test(message) ? 400 : 500;
     console.error('[carbon-offset-estimate]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * PATCH /api/admin/analytics/tree-survival
+ *
+ * Predicts potential farmer income from a carbon project based on land size,
+ * location, practice type, and historical carbon prices.
+ */
+export async function PATCH(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseFarmerIncomePredictionInput(await request.json());
+    const prediction = await getFarmerIncomePrediction(getPool(), input);
+    return NextResponse.json(prediction, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to predict farmer income';
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    console.error('[farmer-income-prediction]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }

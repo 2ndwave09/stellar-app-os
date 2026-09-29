@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/admin/analytics/sponsor-cohort
+ * Get /api/admin/analytics/sponsor-cohort
  *
  * Returns the sponsor cohort retention matrix.
  *
@@ -82,7 +82,7 @@ async function generate1099Forms(pool: any) {
       SUM(sp.amount) AS total_annual
     FROM sponsors s
     JOIN sponsorships sp ON sp.sponsor_id = s.id
-    WHERE sp.created_at >= NOW() - INTERVAL 'y ear'
+    WHERE sp.created_at >= NOW() - INTERVAL '1 year'
     GROUP BY s.id, s.name, s.email
     HAVING SUM(sp.amount) > 20000
   `);
@@ -104,7 +104,7 @@ async function generate1099Forms(pool: any) {
  * or generates 1099 forms for high-value sponsors.
  *
  * Query params:
- *   action \u2014 optional. Set to 'generate_1099' to generate tax forms.
+ *   action — optional. Set to 'generate_1099' to generate tax forms.
  *           If omitted, the default cohort refresh is performed.
  */
 export async function POST(request: Request) {
@@ -150,7 +150,8 @@ async function logAuditEvent(request: Request, action: string, details: Record<s
     const actor = request.headers.get('x-admin-user') || request.headers.get('x-user-id') || 'unknown';
     await pool.query(
       `INSERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
-       VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())`,
+       VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())
+      `,
       [actor, action, JSON.stringify(details)]
     );
   } catch (err) {
