@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { sendSegmentedNewsletter, type NewsletterRecipient } from '@/lib/email/sendgrid';
-import { processFarmerPayments, type PaymentRequest } from '@/lib/payments/farmer-payments';
+import { processFarmerPayments, type PaymentRequest, type PaymentCurrency, type PaymentMethod } from '@/lib/payments/farmer-payments';
 import { auditLog } from '@/lib/audit';
 
 export const runtime = 'nodejs';
 
 const SEGMENTS = new Set(['first-time', 'vip', 'lapsed', 'regional']);
+const CURRENCIES = new Set<PaymentCurrency>(['XLM', 'USDC', 'FIAT']);
+const METHODS = new Set<PaymentMethod>(['bank_transfer', 'crypto_wallet', 'payment_app']);
 
 export async function POST(request: Request) {
   const session = await getServerSession();
@@ -42,6 +44,20 @@ export async function PUT(request: Request) {
     if (!Array.isArray(body.payments) || body.payments.length === 0) {
       await auditLog('admin.payments.invalid_request', { adminEmail, error: 'Missing payments' });
       return NextResponse.json({ error: 'payments are required' }, { status: 400 });
+    }
+    const invalid = body.payments.find((payment) =>
+      !payment?.farmerId ||
+      !CURRENCIES.has(payment.currency) ||
+      !METHODS.has(payment.method) ||
+      typeof payment.amount !== 'number' ||
+      payment.amount <= 0,
+    );
+    if (invalid) {
+      await auditLog('admin.payments.invalid_request', { adminEmail, error: 'Invalid payment entry', payment: invalid });
+      return NextResponse.json(
+        { error: 'each payment requires farmerId, a positive amount, and a supported currency (XLM, USDC, FIAT) and method (bank_transfer, crypto_wallet, payment_app)' },
+        { status: 400 },
+      );
     }
     const results = await processFarmerPayments(body.payments);
     await auditLog('admin.payments.processed', { adminEmail, paymentCount: body.payments.length, results });

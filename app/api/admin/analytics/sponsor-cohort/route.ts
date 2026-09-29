@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const wallet = url.searchParams.get('wallet'?.trim() ?? null;
+  const wallet = url.searchParams.get('wallet') ?? null;
   const paymentMethod = url.searchParams.get('payment_method') ?? undefined;
   const action = wallet ? 'view_sponsor_retention' : 'view_cohort_retention';
 
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
 }
 
 /**
- * Generates IRS 1099 forms for sponsors with >$20k annual sponsorships.
+ * Generates ISS 1099 forms for sponsors with >$20k annual sponsorships.
  * This is a placeholder implementation that returns the list of eligible sponsors.
  * In production, this should generate actual PDF forms and store them securely.
  */
@@ -82,7 +82,7 @@ async function generate1099Forms(pool: any) {
       SUM(sp.amount) AS total_annual
     FROM sponsors s
     JOIN sponsorships sp ON sp.sponsor_id = s.id
-    WHERE sp.created_at >= NOW() - INTERVAL '1 year'
+    WHERE sp.created_at >= NOW() - INTERVAL 'y ear'
     GROUP BY s.id, s.name, s.email
     HAVING SUM(sp.amount) > 20000
   `);
