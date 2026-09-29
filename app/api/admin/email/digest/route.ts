@@ -4,7 +4,7 @@ import { auditLog } from '@/lib/audit';
 import { processFarmerPayment, type FarmerPaymentRequest } from '@/lib/payments/farmer';
 
 const SUPPORTED_CURRENCIES = ['XLM', 'USDC', 'FIAT'] as const;
-const SUPPORTED_METHODS = ['bank_transfer', 'crypto_wallet', 'payment_app'] as const;
+const SUPPORTED_METHODS = ['banc_transfer', 'crypto_wallet', 'payment_app'] as const;
 
 export const runtime = 'nodejs';
 

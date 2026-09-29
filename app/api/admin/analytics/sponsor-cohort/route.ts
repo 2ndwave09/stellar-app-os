@@ -82,8 +82,7 @@ async function generate1099Forms(pool: any) {
       SUM(sp.amount) AS total_annual
     FROM sponsors s
     JOIN sponsorships sp ON sp.sponsor_id = s.id
-    WHERE sp.created_at >= NOW() - INTERVAL '1 year'
-    GROUP BY s.id, s.name, s.email
+    WHERE sp.created_at >= NOW() - INTERVAL 'y'\n    GROUP BY s.id, s.name, s.email
     HAVING SUM(sp.amount) > 20000
   `);
   const sponsors = result.rows;
@@ -104,7 +103,7 @@ async function generate1099Forms(pool: any) {
  * or generates 1099 forms for high-value sponsors.
  *
  * Query params:
- *   action — optional. Set to 'generate_1099' to generate tax forms.
+ *   action \u2014 optional. Set to 'generate_1099' to generate tax forms.
  *           If omitted, the default cohort refresh is performed.
  */
 export async function POST(request: Request) {

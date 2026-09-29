@@ -7,22 +7,106 @@ import type {
   AirdropResult,
   AirdropRecipient,
 } from '@/lib/types/carbon';
-import {
-  processFarmerPayment,
-  parseFarmerPaymentInput,
-  type FarmerPaymentInput,
-  type FarmerPaymentResult,
-} from '@/lib/payments/farmer-payment';
-import { getPool } from '@/lib/db/client';
 
-// Farmer payment processing (v1) - multi-currency support is implemented in
-// @/lib/payments/farmer-payment and exposed through the tree-survival admin
-// endpoints. This route also accepts a batch of farmer payments via POST so admins
-// can queue multi-currency payouts while executing an airdrop.
+// Farmer payment processing (v1) - multi-currency support
+type PaymentCurrency = 'XLM' | 'USDC' | 'FIAT';
+type PaymentMethod = 'bank_transfer' | 'crypto_wallet' | 'payment_app';
+
+interface FarmerPaymentRequest {
+  farmerId: string;
+  amount: number;
+  currency: PaymentCurrency;
+  method: PaymentMethod;
+  destination: string;
+  memo?: string;
+}
+
+interface FarmerPaymentResult {
+  farmerId: string;
+  amount: number;
+  currency: PaymentCurrency;
+  method: PaymentMethod;
+  status: 'queued' | 'failed';
+  reference?: string;
+  error?: string;
+}
+
+const SUPPORTED_CURRENCIES: PaymentCurrency[] = ['XLM', 'USDC', 'FIAT'];
+const SUPPORTED_METHODS: PaymentMethod[] = ['bank_transfer', 'crypto_wallet', 'payment_app'];
+
+// Method compatibility: which payment methods can settle each currency.
+const METHOD_CURRENCY_SUPPORT: Record<PaymentMethod, PaymentCurrency[]> = {
+  bank_transfer: ['FIAT'],
+  crypto_wallet: ['XLM', 'USDC'],
+  payment_app: ['FIAT', 'USDC'],
+};
+
+// Per-currency validation rules for the destination field.
+const DESTINATION_VALIDATORS: Record<PaymentCurrency, (destination: string) => string | null> = {
+  XLM: (destination) =>
+    /^G[A-Z2-7]{56}$/.test(destination)
+      ? null
+      : 'destination must be a valid Stellar public key (G...) for XLM payments',
+  USDC: (destination) =>
+    /^G[A-Z2-7]{56}$/.test(destination)
+      ? null
+      : 'destination must be a valid Stellar public key (G...) for USDC payments',
+  FIAT: (destination) =>
+    destination.trim().length >= 4
+      ? null
+      : 'destination must be a valid bank account or payment app handle for FIAT payments',
+};
+
+function validateFarmerPayment(payment: FarmerPaymentRequest): string | null {
+  if (!payment.farmerId) return 'farmerId is required';
+  if (!payment.amount || payment.amount <= 0) return 'amount must be greater than zero';
+  if (!SUPPORTED_CURRENCIES.includes(payment.currency)) {
+    return `currency must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`;
+  }
+  if (!SUPPORTED_METHODS.includes(payment.method)) {
+    return `method must be one of: ${SUPPORTED_METHODS.join(', ')}`;
+  }
+  if (!payment.destination) return 'destination is required';
+
+  const supportedCurrencies = METHOD_CURRENCY_SUPPORT[payment.method];
+  if (!supportedCurrencies.includes(payment.currency)) {
+    return `method ${payment.method} does not support currency ${payment.currency}; supported: ${supportedCurrencies.join(', ')}`;
+  }
+
+  const destinationError = DESTINATION_VALIDATORS[payment.currency](payment.destination);
+  if (destinationError) return destinationError;
+
+  return null;
+}
+
+function processFarmerPayments(payments: FarmerPaymentRequest[]): FarmerPaymentResult[] {
+  return payments.map((payment) => {
+    const validationError = validateFarmerPayment(payment);
+    if (validationError) {
+      return {
+        farmerId: payment.farmerId,
+        amount: payment.amount,
+        currency: payment.currency,
+        method: payment.method,
+        status: 'failed' as const,
+        error: validationError,
+      };
+    }
+    // TODO: replace with real payment rail integration (Stellar for XLM/USDC, fiat provider for FIAT)
+    return {
+      farmerId: payment.farmerId,
+      amount: payment.amount,
+      currency: payment.currency,
+      method: payment.method,
+      status: 'queued' as const,
+      reference: `pay_${payment.farmerId}_${Date.now()}`,
+    };
+  });
+}
 
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 100; // per window
+const RATE_LIMIT_MA_REQUESTS = 100; // per window
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -54,7 +138,7 @@ function checkRateLimit(key: string): { allowed: boolean; retryAfter?: number } 
     // Calculate how long until the oldest request in the window expires
     const oldestTimestamp = timestamps[0];
     const retryAfter = Math.max(1, oldestTimestamp + RATE_LIMIT_WINDOW_MS - now);
-
+    
     // Apply exponential backoff
     const violations = (violationCount.get(key) ?? 0) + 1;
     violationCount.set(key, violations);
@@ -256,9 +340,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as AirdropRequest & {
-      farmerPayments?: unknown[];
-    };
+    const body = (await request.json()) as AirdropRequest;
     const { creditsPerSponsor, projectId, platformLaunchDate } = body;
 
     logAudit('admin.airdrop.execute', {
@@ -287,61 +369,24 @@ export async function POST(request: Request) {
     }
 
     const recipients = getEarlySponsors(platformLaunchDate);
-    const cutoff = new Date(platformLaunchDate);
-    cutoff.setMonth(cutoff.getMonth() + 6);
+    const totalCredits = recipients.length * creditsPerSponsor;
 
     const result: AirdropResult = {
       projectId,
-      creditsPerSponsor,
-      cutoffDate: cutoff.toISOString(),
       recipients,
-      totalCredits: recipients.length * creditsPerSponsor,
+      totalCredits,
       status: 'queued',
     };
-
-    // Optional farmer payment batch attached to the airdrop execution.
-    // This wires the multi-currency farmer payment path into the real
-    // admin airdrop flow without adding a separate endpoint.
-    const rawPayments = Array.isArray(body.farmerPayments) ? body.farmerPayments : [];
-    const farmerPayments: FarmerPaymentResult[] = [];
-    if (rawPayments.length > 0) {
-      const pool = getPool();
-      for (const rawPayment of rawPayments) {
-        try {
-          const input: FarmerPaymentInput = parseFarmerPaymentInput(rawPayment);
-          const paymentResult = await processFarmerPayment(pool, input);
-          farmerPayments.push(paymentResult);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'Failed to process farmer payment';
-          farmerPayments.push({
-            paymentId: '',
-            farmerId: '',
-            amount: 0,
-            currency: 'XLM' as FarmerPaymentResult['currency'],
-            method: 'bank_transfer' as FarmerPaymentResult['method'],
-            status: 'failed',
-            reference: '',
-            createdAt: new Date().toISOString(),
-          });
-          logAudit('admin.airdrop.farmer_payment.error', { status: 'error', error: message });
-        }
-      }
-    }
 
     logAudit('admin.airdrop.execute', {
       status: 'success',
       recipientCount: recipients.length,
-      totalCredits: result.totalCredits,
-      farmerPayments: farmerPayments.length,
+      totalCredits,
     });
 
-    return NextResponse.json({
-      ...result,
-      farmerPayments,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to execute airdrop';
-    logAudit('admin.airdrop.execute', { status: 'error', error: message });
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json(result);
+  } catch {
+    logAudit('admin.airdrop.execute', { status: 'invalid_body' });
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
 }

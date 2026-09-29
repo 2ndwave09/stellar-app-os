@@ -58,7 +58,7 @@ export async function GET_PAYMENT_METHODS(request: Request): Promise<NextRespons
 }
 
 /**
- * PUT -> /api/admin/analytics/tree-survival
+ * PUT /api/admin/analytics/tree-survival
  *
  * Processes a farmer payment in XLM, USDC, or fiat currency via bank transfer,
  * crypto wallet, or payment app.
