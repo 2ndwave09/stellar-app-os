@@ -47,3 +47,26 @@ model PlantingLocation {
   @@index([latitude, longitude])
   @@map("planting_locations")
 }
+
+// Carbon methodology library (migration 025). Reference catalogue of calculation
+// methodologies; seeded from data/carbon-methodologies/*.json.
+model CarbonMethodology {
+  slug             String   @id
+  code             String
+  name             String
+  category         String   // reforestation | soil_sequestration | renewable_energy | methane_reduction | energy_efficiency
+  standard         String
+  version          String?
+  description      String   @db.Text
+  formula          String   @db.Text
+  parameters       Json     @default("[]")
+  applicability    String[]
+  sourceRef        String   @map("source_ref") @db.Text
+  metadataVerified Boolean  @default(false) @map("metadata_verified")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("carbon_methodologies")
+  @@index([category])
+  @@index([standard])
+}
