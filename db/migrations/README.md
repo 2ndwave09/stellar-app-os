@@ -28,6 +28,9 @@ Migrations are numbered sequentially and should be named in the format: `XXX_des
 - `013_create_daily_challenges.sql` - Stores daily challenge templates, sponsor progress, rewards, and streaks (#1158)
 - `014_create_research_tables.sql` - Stores research plot locations, field measurements, satellite metrics, and correction factors for the climate impact study (see `docs/research/climate-impact-methodology.md`)
 - `015_create_email_digests.sql` - Stores pending/sent/failed email digest jobs for the email digest worker (see `lib/workers/email-digest-worker.ts`)
+- `016_create_retirement_receipts.sql` - Immutable blockchain-anchored retirement receipts with canonical SHA-256 digests (#1330, see `lib/carbon/retirement-proof.ts`)
+- `017_create_credit_purchase_batches.sql` - Tracks purchases coalesced into single on-chain transactions to reduce gas fees (#1328, see `lib/carbon/purchase-batcher.ts`)
+- `018_create_corporate_offset_programs.sql` - Corporate offset programs, automated purchases, and monthly ESG reports (#1337, see `lib/corporate-offset.ts`)
 
 ## Running Migrations
 
