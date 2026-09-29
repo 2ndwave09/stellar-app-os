@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { SwaggerUIClient } from '@/components/organisms/ApiDocumentation/SwaggerUIClient';
+import { FarmerIncomePredictionClient } from '@/components/organisms/ApiDocumentation/FarmerIncomePredictionClient';
 
 export const metadata: Metadata = {
   title: 'Interactive Swagger UI & Live API Console | FarmCredit',
@@ -8,5 +9,10 @@ export const metadata: Metadata = {
 };
 
 export default function SwaggerDocsPage() {
-  return <SwaggerUIClient />;
+  return (
+    <>
+      <SwaggerUIClient />
+      <FarmerIncomePredictionClient />
+    </>
+  );
 }
