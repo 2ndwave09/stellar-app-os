@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:testnet": "dotenxv run --env-file=.env.testnet -- next dev",
-    "dev:mainnet": "dotenxv run --env-file=.env.mainnet -- next dev",
-    "build": "next build --webpack",
-    "build:testnet": "dotenxv run --env-file=.env.testnet -- next build --webpack",
-    "build:mainnet": "dotenxv run --env-file=.env.mainnet -- next build --webpack",
-    "start": "next start",
+    "dev": "node init && next dev",
+    "dev:testnet": "node init && dotenxv run --env-file=.env.testnet -- next dev",
+    "dev:mainnet": "node init && dotenxv run --env-file=.env.mainnet -- next dev",
+    "build": "node init && next build --webpack",
+    "build:testnet": "node init && dotenxv run --env-file=.env.testnet -- next build --webpack",
+    "build:mainnet": "node init && dotenxv run --env-file=.env.mainnet -- next build --webpack",
+    "start": "node init && next start",
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
@@ -147,8 +147,16 @@
   "packageManager": "pnpm@10.28.1+sha512.7d7ddbca9e99447b7c3bf7a73286afafabe99251eb9498ba7efad406892f67b871db3a1d7e687fc4ccc1a388c7175fbaae567a26ab44d1067b54fcb0d6a316",
   "i18n": {
     "defaultLocale": "en",
-    "locales": ["en", "es", "fr", "zh", "ar"],
-    "rtlLocales": ["ar"]
+    "locales": [
+      "en",
+      "es",
+      "fr",
+      "zh",
+      "ar"
+    ],
+    "rtlLocales": [
+      "ar"
+    ]
   },
   "lint-staged": {
     "*{.ts,.tsx}": [
