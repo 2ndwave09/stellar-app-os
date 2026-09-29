@@ -1,5 +1,5 @@
 [package]
-name = "farmer-escrow"
+name = "cross-chain-settlement"
 version = "0.1.0"
 edition = "2021"
 
