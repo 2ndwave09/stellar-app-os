@@ -32,7 +32,8 @@
     "db:backup": "node scripts/db-backup.mjs",
     "compliance:export": "tsx scripts/compliance-export.ts",
     "compliance:export:dry-run": "tsx scripts/compliance-export.ts --dry-run",
-    "prepare": "husky"
+    "prepare": "husky",
+    "monitor:fraud": "tsx lib/monitor/fraud-worker.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1037.0",
