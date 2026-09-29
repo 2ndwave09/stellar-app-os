@@ -26,6 +26,12 @@ Migrations are numbered sequentially and should be named in the format: `XXX_des
 - `011_create_sponsor_cohort_retention.sql` - Stores sponsor cohort data, sponsorship events, and monthly retention snapshots (#993)
 - `012_create_school_partnerships.sql` - Stores school partnerships, student memberships, class project batches, and contributions (#1149)
 - `013_create_daily_challenges.sql` - Stores daily challenge templates, sponsor progress, rewards, and streaks (#1158)
+- `014_create_research_tables.sql` - Stores research plot locations, field measurements, satellite metrics, and correction factors for the climate impact study (see `docs/research/climate-impact-methodology.md`)
+- `015_create_email_digests.sql` - Stores pending/sent/failed email digest jobs for the email digest worker (see `lib/workers/email-digest-worker.ts`)
+- `018_add_tree_search_indexes.sql` - Adds indexes on trees (region, species_slug, planter_id) for search query optimization (#1175)
+- `019_create_farmer_kyc.sql` - Stores farmer KYC applications: identity verification, land ownership proof, agricultural experience, and certification eligibility screening (#1397)
+- `020_create_sponsor_email_campaigns.sql` - Stores segmented newsletter campaigns and delivery attempts (#1117), plus digest-generation indexes (#1110)
+- `025_create_carbon_methodologies.sql` - Stores the carbon methodology library (Verra/CDM/Gold Standard/IPCC methodology summaries in 5 categories); seeded by `pnpm seed:methodologies` (see `docs/carbon-methodologies.md`)
 
 ## Running Migrations
 
@@ -53,6 +59,9 @@ npm run db:migrate:validate
 
 # Seed species catalogue (after running migrations)
 npm run seed:species
+
+# Seed carbon methodology library (after running migrations)
+npm run seed:methodologies
 ```
 
 ### Environment Variables
