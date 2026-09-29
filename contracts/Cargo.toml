@@ -22,7 +22,6 @@ members = [
     "treasury",
     "admin-controls",
     "carbon-credits",
-    "bonus-pool",
     "kyc-attestation",
     "species-registry",
     "species-voting",
