@@ -8,10 +8,23 @@ export const metadata: Metadata = {
     'Explore an offset project in 3D: forest growth over time, soil sequestration depth and the emissions reduction rate.',
 };
 
-export default function ImpactModel3DPage() {
+type PageProps = {
+  searchParams?: Promise<{ project?: string }> | { project?: string };
+};
+
+export default async function ImpactModel3DPage({ searchParams }: PageProps) {
+  const params = await Promise.resolve(searchParams ?? {});
+  const initialProjectId =
+    typeof params.project === 'string' && params.project.length > 0
+      ? params.project
+      : undefined;
+
   return (
     <main className="container mx-auto px-4 py-8">
-      <ImpactModel3D projects={mockCarbonProjects} />
+      <ImpactModel3D
+        projects={mockCarbonProjects}
+        initialProjectId={initialProjectId}
+      />
     </main>
   );
 }
