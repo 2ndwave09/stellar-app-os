@@ -5,6 +5,7 @@ import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tre
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
+import { getProjectComparison, parseProjectComparisonInput } from '@/lib/analytics/project-comparison';
 
 export const runtime = 'nodejs';
 
@@ -100,6 +101,30 @@ export async function POST(request: Request): Promise<NextResponse> {
     const message = error instanceof Error ? error.message : 'Failed to estimate carbon offset';
     const status = /must be|required|invalid|non-negative/.test(message) ? 400 : 500;
     console.error('[carbon-offset-estimate]', error);
+    return NextResponse.json({ error: message }, { status });
+  }
+}
+
+/**
+ * DELETE /api/admin/analytics/tree-survival
+ *
+ * Compares multiple offset projects side-by-side: price, co-benefits,
+ * methodology, verifier, risk rating, and buyer reviews.
+ */
+export async function DELETE(request: Request): Promise<NextResponse> {
+  if (!(await isAdminRequest())) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  try {
+    const input = parseProjectComparisonInput(await request.json());
+    const comparison = await getProjectComparison(getPool(), input);
+    return NextResponse.json(comparison, {
+      headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to compare projects';
+    const status = /must be|required|invalid|at least two|unsupported/.test(message) ? 400 : 500;
+    console.error('[project-comparison]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }
