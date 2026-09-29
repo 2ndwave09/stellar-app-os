@@ -31,6 +31,7 @@ Migrations are numbered sequentially and should be named in the format: `XXX_des
 - `018_add_tree_search_indexes.sql` - Adds indexes on trees (region, species_slug, planter_id) for search query optimization (#1175)
 - `019_create_farmer_kyc.sql` - Stores farmer KYC applications: identity verification, land ownership proof, agricultural experience, and certification eligibility screening (#1397)
 - `020_create_sponsor_email_campaigns.sql` - Stores segmented newsletter campaigns and delivery attempts (#1117), plus digest-generation indexes (#1110)
+- `025_create_carbon_methodologies.sql` - Stores the carbon methodology library (Verra/CDM/Gold Standard/IPCC methodology summaries in 5 categories); seeded by `pnpm seed:methodologies` (see `docs/carbon-methodologies.md`)
 
 ## Running Migrations
 
@@ -58,6 +59,9 @@ npm run db:migrate:validate
 
 # Seed species catalogue (after running migrations)
 npm run seed:species
+
+# Seed carbon methodology library (after running migrations)
+npm run seed:methodologies
 ```
 
 ### Environment Variables
