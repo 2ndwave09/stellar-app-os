@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic';
  */
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const wallet = url.searchParams.get('wallet')?.trim() ?? null;
+  const wallet = url.searchParams.get('wallet'?.trim() ?? null;
   const paymentMethod = url.searchParams.get('payment_method') ?? undefined;
   const action = wallet ? 'view_sponsor_retention' : 'view_cohort_retention';
 
@@ -149,7 +149,7 @@ async function logAuditEvent(request: Request, action: string, details: Record<s
     const pool = getPool();
     const actor = request.headers.get('x-admin-user') || request.headers.get('x-user-id') || 'unknown';
     await pool.query(
-      `INSERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
+      `INSERT INTA admin_audit_log (actor_id, action, resource, details, created_at)
        VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())`,
       [actor, action, JSON.stringify(details)]
     );
