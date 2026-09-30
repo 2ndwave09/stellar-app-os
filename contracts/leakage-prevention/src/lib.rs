@@ -1,6 +1,6 @@
 #![no_std]
 
-//! Leakage prevention — permanent sequestration (issue #1344).
+//! Leakage prevention — permanent sequestration (issue #1282).
 //!
 //! Afforestation credits only keep their value if the trees stay standing.
 //! This contract locks a 30-year permanence commitment per project: the
@@ -38,7 +38,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, panic_with_error, symbol_short, token,
-    Address, Env,
+    Address, BytesN, Env,
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -132,7 +132,7 @@ pub struct Commitment {
     /// Machine-readable project id (e.g. the tree-registry project symbol).
     pub project_id: Address,
     /// Uppercase registry project type; must be `AFFORESTATION`.
-    pub project_type: [u8; 16],
+    pub project_type: BytesN<16>,
     pub kind: GuaranteeKind,
     /// Escrowed amount for bonds; the insured value for insurance policies.
     pub amount: i128,
@@ -206,7 +206,7 @@ impl LeakagePrevention {
         env: Env,
         owner: Address,
         project_id: Address,
-        project_type: [u8; 16],
+        project_type: BytesN<16>,
         bond: i128,
         tonnes: i128,
     ) -> u64 {
@@ -244,7 +244,7 @@ impl LeakagePrevention {
         env: Env,
         owner: Address,
         project_id: Address,
-        project_type: [u8; 16],
+        project_type: BytesN<16>,
         insured_value: i128,
         tonnes: i128,
         policy_id: u64,
@@ -451,7 +451,7 @@ impl LeakagePrevention {
         env: &Env,
         owner: &Address,
         project_id: &Address,
-        project_type: [u8; 16],
+        project_type: BytesN<16>,
         kind: GuaranteeKind,
         amount: i128,
         tonnes: i128,
@@ -495,8 +495,9 @@ impl LeakagePrevention {
 
     /// v1 guards afforestation only; compare the fixed-size type without
     /// allocating by trimming trailing NULs/spaces and upper-casing.
-    fn require_afforestation(env: &Env, project_type: &[u8; 16]) {
-        let trimmed = trim_trailing(project_type);
+    fn require_afforestation(env: &Env, project_type: &BytesN<16>) {
+        let arr = project_type.to_array();
+        let trimmed = trim_trailing(&arr);
         if trimmed.len() != AFFORESTATION.len() {
             panic_with_error!(env, LeakageError::NotAfforestation);
         }
@@ -584,18 +585,15 @@ mod tests {
     const TONNES: i128 = 500;
 
     /// Fixed-size project-type label, padded with NULs.
-    const fn project_type(name: &[u8]) -> [u8; 16] {
+    fn project_type(env: &Env, name: &[u8]) -> BytesN<16> {
         let mut out = [0u8; 16];
         let mut i = 0;
-        while i < name.len() {
+        while i < name.len() && i < 16 {
             out[i] = name[i];
             i += 1;
         }
-        out
+        BytesN::from_array(env, &out)
     }
-
-    const AFFORESTATION_TYPE: [u8; 16] = project_type(b"AFFORESTATION");
-    const REFORESTATION_TYPE: [u8; 16] = project_type(b"Reforestation");
 
     fn setup() -> (Env, Address, Address, Address, LeakagePreventionClient<'static>) {
         let env = Env::default();
@@ -633,7 +631,8 @@ mod tests {
         let owner = Address::generate(env);
         let project_id = Address::generate(env);
         mint(env, token, &owner, BOND);
-        let id = client.post_bond(&owner, &project_id, &AFFORESTATION_TYPE, &BOND, &TONNES);
+        let afforestation_type = project_type(env, b"AFFORESTATION");
+        let id = client.post_bond(&owner, &project_id, &afforestation_type, &BOND, &TONNES);
         (owner, project_id, id)
     }
 
@@ -686,7 +685,7 @@ mod tests {
         mint(&env, &token, &owner, BOND);
 
         let id =
-            client.post_bond(&owner, &project_id, &project_type(b"afforestation"), &BOND, &TONNES);
+            client.post_bond(&owner, &project_id, &project_type(&env, b"afforestation"), &BOND, &TONNES);
         assert_eq!(id, 1);
     }
 
@@ -697,16 +696,16 @@ mod tests {
         let owner = Address::generate(&env);
         let project_id = Address::generate(&env);
         mint(&env, &token, &owner, BOND);
-        client.post_bond(&owner, &project_id, &REFORESTATION_TYPE, &BOND, &TONNES);
+        client.post_bond(&owner, &project_id, &project_type(&env, b"Reforestation"), &BOND, &TONNES);
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #4)")]
     fn test_post_bond_rejects_zero_amount() {
-        let (env, _, _, token, client) = setup();
+        let (env, _, _, _token, client) = setup();
         let owner = Address::generate(&env);
         let project_id = Address::generate(&env);
-        client.post_bond(&owner, &project_id, &AFFORESTATION_TYPE, &0, &TONNES);
+        client.post_bond(&owner, &project_id, &project_type(&env, b"AFFORESTATION"), &0, &TONNES);
     }
 
     #[test]
@@ -715,7 +714,7 @@ mod tests {
         let (env, _, _, token, client) = setup();
         let (owner, project_id, _) = bonded(&env, &client, &token);
         mint(&env, &token, &owner, BOND);
-        client.post_bond(&owner, &project_id, &AFFORESTATION_TYPE, &BOND, &TONNES);
+        client.post_bond(&owner, &project_id, &project_type(&env, b"AFFORESTATION"), &BOND, &TONNES);
     }
 
     // ── insurance guarantees ─────────────────────────────────────────────────
@@ -730,7 +729,7 @@ mod tests {
         let id = client.register_insurance(
             &owner,
             &project_id,
-            &AFFORESTATION_TYPE,
+            &project_type(&env, b"AFFORESTATION"),
             &BOND,
             &TONNES,
             &7,
@@ -753,7 +752,7 @@ mod tests {
         client.register_insurance(
             &owner,
             &project_id,
-            &AFFORESTATION_TYPE,
+            &project_type(&env, b"AFFORESTATION"),
             &BOND,
             &TONNES,
             &0,
@@ -907,7 +906,7 @@ mod tests {
         let owner = Address::generate(&env);
         let project_id = Address::generate(&env);
         mint(&env, &token, &owner, BOND);
-        client.register_insurance(&owner, &project_id, &AFFORESTATION_TYPE, &BOND, &TONNES, &7);
+        client.register_insurance(&owner, &project_id, &project_type(&env, b"AFFORESTATION"), &BOND, &TONNES, &7);
 
         client.report_leakage(&Address::generate(&env), &project_id);
         advance(&env, DISPUTE_WINDOW_SECS + 1);
