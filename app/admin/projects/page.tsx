@@ -49,15 +49,15 @@ export default function AdminProjectsPage(): ReactNode {
 
   const projectTypes = useMemo(
     () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.type))),
-    [],
+    []
   );
   const locations = useMemo(
     () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.country))),
-    [],
+    []
   );
   const certifications = useMemo(
     () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.certificationStandard))),
-    [],
+    []
   );
 
   return (
@@ -128,7 +128,7 @@ export default function AdminProjectsPage(): ReactNode {
                   checked={coBenefits.includes(benefit)}
                   onChange={(e) =>
                     setCoBenefits((prev) =>
-                      e.target.checked ? [...prev, benefit] : prev.filter((b) => b !== benefit),
+                      e.target.checked ? [...prev, benefit] : prev.filter((b) => b !== benefit)
                     )
                   }
                 />
@@ -157,8 +157,8 @@ export default function AdminProjectsPage(): ReactNode {
         </label>
       </div>
 
-      <div ref={scrollRef className="overflow-auto" style={ height: '600px' }}>
-        <div className="relative" style={ height: `${virtualizer.getTotalSize()}px` }>
+      <div ref={scrollRef} className="overflow-auto" style={{ height: '600px' }}>
+        <div className="relative" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const project = filteredProjects[virtualItem.index];
             return (
@@ -167,7 +167,7 @@ export default function AdminProjectsPage(): ReactNode {
                 ref={virtualizer.measureElement}
                 data-index={virtualItem.index}
                 className="absolute top-0 left-0 w-full"
-                style={ transform: `translateY(${virtualItem.start}px)` }
+                style={{ transform: `translateY(${virtualItem.start}px)` }}
               >
                 <div className="p-2">
                   <Card>
@@ -175,7 +175,7 @@ export default function AdminProjectsPage(): ReactNode {
                       <div>
                         <CardTitle className="text-xl">{project.name}</CardTitle>
                         <CardDescription>
-                          {project.id} •  {project.country} •  {project.type}
+                          {project.id} • {project.country} • {project.type}
                         </CardDescription>
                       </div>
                       <div className="flex flex-wrap gap-2">
