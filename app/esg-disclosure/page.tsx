@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
-import { generateEsgExcel, generateEsgReport } from '@/lib/corporate';
+import { generateEsgReport } from '@/lib/corporate';
 import type { BuyerAnalyticsSummary } from '@/lib/api/buyer-analytics';
 import {
   buildEsgInputFromAnalytics,
@@ -70,24 +70,16 @@ function EsgDisclosureTool() {
     }
   };
 
-  const reportPayload = () => ({
-    companyName: report.companyName,
-    totalTrees: report.totalTrees,
-    totalCo2Offset: report.totalCo2Offset,
-    projectsSupported: report.projectsSupported,
-    period: report.period,
-    reportId: report.reportId,
-    offsets: report.offsets,
-    coBenefits: report.coBenefits,
-    supplyChain: report.supplyChain,
-  });
-
   const handleExport = () => {
-    generateEsgReport(reportPayload());
-  };
-
-  const handleExportExcel = () => {
-    generateEsgExcel(reportPayload());
+    generateEsgReport({
+      companyName: report.companyName,
+      totalTrees: report.totalTrees,
+      totalCo2Offset: report.totalCo2Offset,
+      projectsSupported: report.projectsSupported,
+      period: report.period,
+      reportId: report.reportId,
+      offsets: report.offsets,
+    });
   };
 
   const handleShare = async () => {
@@ -207,13 +199,6 @@ function EsgDisclosureTool() {
               </button>
               <button
                 type="button"
-                onClick={handleExportExcel}
-                className="rounded-lg bg-stellar-blue px-4 py-3 text-sm font-semibold text-white"
-              >
-                Export Excel
-              </button>
-              <button
-                type="button"
                 onClick={handleShare}
                 className="rounded-lg border border-border px-4 py-3 text-sm font-semibold text-foreground"
               >
@@ -267,57 +252,6 @@ function EsgDisclosureTool() {
                 </li>
               ))}
             </ul>
-
-            <h3 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground">
-              Co-benefits achieved
-            </h3>
-            {(report.coBenefits?.length ?? 0) === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">
-                No co-benefit data yet. Load your offset data to include it.
-              </p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {(report.coBenefits ?? []).map((benefit) => (
-                  <li
-                    key={benefit.name}
-                    className="flex items-start justify-between gap-4 rounded-lg border border-border px-4 py-3"
-                  >
-                    <p className="font-medium text-foreground">{benefit.name}</p>
-                    <p className="text-sm font-semibold text-stellar-blue">
-                      {benefit.tonnes} tCO2e · {benefit.sharePercentage}%
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <h3 className="mt-8 text-sm font-semibold uppercase tracking-wide text-foreground">
-              Supply chain impact
-            </h3>
-            {(report.supplyChain?.length ?? 0) === 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">
-                No supply chain data yet. Load your offset data to include it.
-              </p>
-            ) : (
-              <ul className="mt-3 space-y-3">
-                {(report.supplyChain ?? []).map((project) => (
-                  <li
-                    key={`${project.projectName}-${project.location}`}
-                    className="flex items-start justify-between gap-4 rounded-lg border border-border px-4 py-3"
-                  >
-                    <div>
-                      <p className="font-medium text-foreground">{project.projectName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {project.location} · {project.stageSummary}
-                      </p>
-                    </div>
-                    <p className="text-sm font-semibold text-stellar-blue">
-                      {project.tonnesCo2e} tCO2e
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            )}
           </article>
         </div>
       </section>
