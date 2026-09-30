@@ -60,6 +60,8 @@ tags:
     description: Administrative operations (airdrop)
   - name: Planters
     description: Planter registration and photo uploads
+  - name: Farmers
+    description: Consent-bound farmer identity, land, and credit verification
   - name: Webhooks
     description: Webhook event management and retry
   - name: Newsletter
@@ -2657,6 +2659,138 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   # ──────────────────────────────────────────────
+  # Farmers
+  # ──────────────────────────────────────────────
+  /api/v1/farmers/{farmerAddress}/verification:
+    get:
+      operationId: getV1FarmerVerification
+      tags: [Farmers]
+      summary: Verify a farmer for a third-party integration
+      description: >
+        Returns consent-bound identity, land-ownership, certification, and
+        credit-availability assertions. Personal identifiers and evidence
+        documents are never returned.
+      security:
+        - apiKeyAuth: []
+      parameters:
+        - name: farmerAddress
+          in: path
+          required: true
+          description: Stellar public key of the farmer to verify.
+          schema:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+      responses:
+        "200":
+          description: Farmer verification report
+          headers:
+            X-API-Version:
+              schema:
+                type: string
+                enum: [v1]
+            X-API-Tier:
+              schema:
+                type: string
+                enum: [free, standard, premium]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationReport"
+        "400":
+          description: Invalid Stellar farmer address
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: The farmer has not consented to third-party disclosure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationError"
+        "404":
+          description: No verification record exists for this farmer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationError"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          description: API-key authentication is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/farmers/verification:
+    post:
+      operationId: postV1FarmerVerificationBatch
+      tags: [Farmers]
+      summary: Verify a portfolio of farmers
+      description: >
+        Verifies 1–100 unique Stellar farmer addresses. Invalid entries reject
+        the complete request; missing and non-consenting records are returned
+        in separate buckets.
+      security:
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [addresses]
+              properties:
+                addresses:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: "^G[A-Z2-7]{55}$"
+      responses:
+        "200":
+          description: Portfolio verification results
+          headers:
+            X-API-Version:
+              schema:
+                type: string
+                enum: [v1]
+            X-API-Tier:
+              schema:
+                type: string
+                enum: [free, standard, premium]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationBatch"
+        "400":
+          description: Malformed JSON or invalid address list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmerVerificationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+        "503":
+          description: API-key authentication is temporarily unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ──────────────────────────────────────────────
   # Planters
   # ──────────────────────────────────────────────
   /api/planters/register:
@@ -2953,6 +3087,11 @@ components:
       type: http
       scheme: bearer
       description: WEBHOOK_CRON_SECRET token
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: Active public API key issued by POST /api/api-keys
 
   schemas:
     ErrorResponse:
@@ -2960,6 +3099,205 @@ components:
       properties:
         error:
           type: string
+
+    FarmerVerificationError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          enum: [invalid_address, consent_denied, not_found]
+        details:
+          type: array
+          items:
+            type: string
+
+    FarmerVerificationReport:
+      type: object
+      additionalProperties: false
+      required:
+        - farmerAddress
+        - apiVersion
+        - verificationStatus
+        - verified
+        - identity
+        - land
+        - certification
+        - credit
+        - consent
+        - checkedAt
+      properties:
+        farmerAddress:
+          type: string
+          pattern: "^G[A-Z2-7]{55}$"
+        apiVersion:
+          type: string
+          enum: [v1]
+        verificationStatus:
+          type: string
+          enum: [verified, pending, rejected, expired]
+        verified:
+          type: boolean
+        identity:
+          $ref: "#/components/schemas/FarmerVerificationIdentity"
+        land:
+          $ref: "#/components/schemas/FarmerVerificationLand"
+        certification:
+          $ref: "#/components/schemas/FarmerVerificationCertification"
+        credit:
+          $ref: "#/components/schemas/FarmerVerificationCredit"
+        consent:
+          type: object
+          additionalProperties: false
+          required: [granted]
+          properties:
+            granted:
+              type: boolean
+              enum: [true]
+        checkedAt:
+          type: string
+          format: date-time
+
+    FarmerVerificationIdentity:
+      type: object
+      additionalProperties: false
+      required: [verified, verifiedAt, documentType]
+      properties:
+        verified:
+          type: boolean
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        documentType:
+          type: string
+          enum: [nin, voter_card, passport, drivers_licence]
+          nullable: true
+
+    FarmerVerificationLand:
+      type: object
+      additionalProperties: false
+      required:
+        - verified
+        - verifiedAt
+        - ownershipType
+        - plotSizeHectares
+        - region
+        - gpsCoordinates
+      properties:
+        verified:
+          type: boolean
+        verifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        ownershipType:
+          type: string
+          enum: [title_deed, lease, customary, communal, family_inheritance]
+          nullable: true
+        plotSizeHectares:
+          type: number
+          minimum: 0
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        gpsCoordinates:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [latitude, longitude]
+          properties:
+            latitude:
+              type: number
+              minimum: -90
+              maximum: 90
+            longitude:
+              type: number
+              minimum: -180
+              maximum: 180
+
+    FarmerVerificationCertification:
+      type: object
+      additionalProperties: false
+      required: [eligible, tier, blockers, advisories, rulesetVersion]
+      properties:
+        eligible:
+          type: boolean
+        tier:
+          type: string
+          enum: [none, provisional, full]
+        blockers:
+          type: array
+          items:
+            type: string
+        advisories:
+          type: array
+          items:
+            type: string
+        rulesetVersion:
+          type: string
+
+    FarmerVerificationCredit:
+      type: object
+      additionalProperties: false
+      required:
+        - available
+        - tier
+        - blockers
+        - advisories
+        - applicationSettled
+        - sanctionsClear
+      properties:
+        available:
+          type: boolean
+        tier:
+          type: string
+          enum: [none, provisional, full]
+        blockers:
+          type: array
+          items:
+            type: string
+        advisories:
+          type: array
+          items:
+            type: string
+        applicationSettled:
+          type: boolean
+        sanctionsClear:
+          type: boolean
+
+    FarmerVerificationBatch:
+      type: object
+      additionalProperties: false
+      required: [requested, count, verified, reports, notFound, consentDenied]
+      properties:
+        requested:
+          type: integer
+          minimum: 1
+          maximum: 100
+        count:
+          type: integer
+          minimum: 0
+        verified:
+          type: integer
+          minimum: 0
+        reports:
+          type: array
+          items:
+            $ref: "#/components/schemas/FarmerVerificationReport"
+        notFound:
+          type: array
+          items:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
+        consentDenied:
+          type: array
+          items:
+            type: string
+            pattern: "^G[A-Z2-7]{55}$"
 
     GhgInventoryRequest:
       type: object
