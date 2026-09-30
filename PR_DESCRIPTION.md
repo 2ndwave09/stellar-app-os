@@ -1,10 +1,19 @@
 ## Summary
 
-Implements the **Perceptual Hashing (pHash) Duplicate Photo Detection Engine** for the backend (`Issue #825`). Every planting photo submitted through `POST /api/planting/photo` is now fingerprinted with a 64-bit DCT-based pHash and rejected with HTTP `422 Unprocessable Entity` when a near-duplicate already exists in the `photo_hashes` table. A new standalone pre-flight endpoint, `POST /api/planting/photo/dedup-check`, lets the UI preview whether a photo would be accepted before round-tripping the full upload.
+Implements **ESG Compliance Reporting v2** for buyers — a data-driven report view showing carbon offset purchases, co-benefits achieved, and supply chain impact with PDF and Excel exports (`Issue #1407`). Extends the existing v1 ESG disclosure tool (Issue #1317, manual form entry) with:
+
+- Real purchase data loaded from buyer analytics (no manual entry)
+- Three structured report sections: carbon offsets, co-benefits, supply chain
+- Time-period selection (This Month, This Quarter, custom date range)
+- Structured Excel export (5 sheets: Summary, Offsets, Co-Benefits, Supply Chain, Disclaimer)
+- Enhanced PDF export with branded layout and three-section formatting
+- Generic compliance labeling (no GHG Protocol, ISSB, or CSRD framework claims)
+
+The feature is backwards-compatible with v1 and shares the buyer-analytics aggregation layer; no new data models required.
 
 ## Related Issue
 
-Closes #825
+Closes #1407
 
 ## What Was Implemented
 
