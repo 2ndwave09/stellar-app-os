@@ -591,6 +591,112 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /api/v2/carbon-accounting:
+    get:
+      operationId: getCarbonAccounting
+      tags: [Carbon]
+      summary: Emission-factor catalogue, or an ad-hoc inventory from scalar query params
+      description: |
+        GHG Protocol corporate carbon accounting.
+
+        With no query parameters this returns the emission-factor catalogue —
+        every published factor the calculator uses, so results are reproducible.
+
+        Supplying any `scope1.*`, `scope2.*` or `offsets.*` parameter (or `from`/`to`)
+        instead runs an inventory and returns a `GhgInventoryReport`. Scope 3 activity
+        data is too structured for a query string; use POST for the full shape.
+      parameters:
+        - name: scope1.naturalGasTherms
+          in: query
+          description: Scope 1 stationary combustion, therms burned
+          schema:
+            type: number
+            minimum: 0
+        - name: scope2.electricityKwh
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: scope2.gridRegion
+          in: query
+          description: Grid emission factor to apply
+          schema:
+            type: string
+            enum: [us-average, us-west, eu, uk, global]
+            default: us-average
+        - name: scope2.renewablePercentage
+          in: query
+          description: Share of electricity covered by renewable contracts (RECs/PPAs)
+          schema:
+            type: number
+            minimum: 0
+            maximum: 100
+        - name: offsets.creditsRetiredTonnes
+          in: query
+          schema:
+            type: number
+            minimum: 0
+        - name: offsets.treesPlanted
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+        - name: from
+          in: query
+          description: Reporting period start (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Reporting period end (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: |
+            Factor catalogue, or a `GhgInventoryReport` when inventory parameters are present.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/GhgFactorCatalogue"
+                  - $ref: "#/components/schemas/GhgInventoryReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      operationId: createCarbonAccountingInventory
+      tags: [Carbon]
+      summary: Calculate a full GHG Protocol inventory
+      description: |
+        Accepts the complete Scope 1 / 2 / 3 activity dataset and returns a
+        `GhgInventoryReport`.
+
+        Offsets (retired credits, tree sequestration) are reported separately
+        from gross emissions, as the GHG Protocol requires reductions and offsets
+        to remain distinguishable; a net position is provided for convenience.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GhgInventoryRequest"
+      responses:
+        "200":
+          description: GHG Protocol inventory report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GhgInventoryReport"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /api/planting/growth-projection:
     get:
       operationId: getGrowthProjection
@@ -2854,6 +2960,372 @@ components:
       properties:
         error:
           type: string
+
+    GhgInventoryRequest:
+      type: object
+      description: At least one of scope1, scope2, scope3 or offsets is required.
+      properties:
+        reportingPeriod:
+          type: object
+          description: Defaults to the current calendar year.
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        organization:
+          type: object
+          properties:
+            name:
+              type: string
+            employees:
+              type: integer
+              minimum: 1
+              description: Enables a per-employee intensity metric.
+        scope1:
+          type: object
+          description: Direct emissions from owned or controlled sources.
+          properties:
+            stationary:
+              type: array
+              items:
+                $ref: "#/components/schemas/GhgFuelLine"
+            mobile:
+              type: array
+              items:
+                $ref: "#/components/schemas/GhgFuelLine"
+            fugitive:
+              type: array
+              items:
+                type: object
+                required: [refrigerant, quantityKg]
+                properties:
+                  refrigerant:
+                    type: string
+                    enum: [R-410A, R-134A, R-404A, R-22]
+                  quantityKg:
+                    type: number
+                    minimum: 0
+                    description: Charge weight in kg.
+        scope2:
+          type: object
+          description: Indirect emissions from purchased energy.
+          properties:
+            electricityKwh:
+              type: number
+              minimum: 0
+            heatKwh:
+              type: number
+              minimum: 0
+            steamKwh:
+              type: number
+              minimum: 0
+            gridRegion:
+              type: string
+              enum: [us-average, us-west, eu, uk, global]
+              default: us-average
+            renewablePercentage:
+              type: number
+              minimum: 0
+              maximum: 100
+              description: Share of electricity covered by renewable contracts (RECs/PPAs).
+        scope3:
+          type: object
+          description: Value-chain emissions; categories 4, 5, 6 and 7 are supported.
+          properties:
+            freight:
+              type: array
+              items:
+                type: object
+                required: [mode, tonnes, distanceKm]
+                properties:
+                  mode:
+                    type: string
+                    enum: [truck, rail, air, ship]
+                  tonnes:
+                    type: number
+                    minimum: 0
+                  distanceKm:
+                    type: number
+                    minimum: 0
+            waste:
+              type: array
+              items:
+                type: object
+                required: [method, tonnes]
+                properties:
+                  method:
+                    type: string
+                    enum: [landfill, incineration, recycled, composted]
+                  tonnes:
+                    type: number
+                    minimum: 0
+            businessTravel:
+              type: object
+              properties:
+                shortHaulFlights:
+                  type: integer
+                  minimum: 0
+                longHaulFlights:
+                  type: integer
+                  minimum: 0
+                railKm:
+                  type: number
+                  minimum: 0
+                carKm:
+                  type: number
+                  minimum: 0
+            commuting:
+              type: array
+              items:
+                type: object
+                required: [mode, distanceKm]
+                properties:
+                  mode:
+                    type: string
+                    enum: [car, bus, rail, walk, bike]
+                  distanceKm:
+                    type: number
+                    minimum: 0
+        offsets:
+          type: object
+          description: Reported separately from gross emissions, per the GHG Protocol.
+          properties:
+            creditsRetiredTonnes:
+              type: number
+              minimum: 0
+            treesPlanted:
+              type: integer
+              minimum: 0
+            co2KgPerTree:
+              type: number
+              minimum: 0
+              description: Override the default lifetime sequestration per tree (kg CO2e).
+
+    GhgFuelLine:
+      type: object
+      required: [fuel, quantity]
+      properties:
+        fuel:
+          type: string
+          enum: [natural-gas, gasoline, diesel]
+        quantity:
+          type: number
+          minimum: 0
+          description: Therms for natural gas, gallons for gasoline/diesel.
+
+    EmissionsLine:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Human-readable source label, e.g. 'natural-gas', 'R-410A', 'truck'.
+        emissionsKg:
+          type: number
+
+    GhgInventoryReport:
+      type: object
+      properties:
+        standard:
+          type: string
+          example: GHG Protocol Corporate Standard
+        version:
+          type: string
+          example: "2.0"
+        generatedAt:
+          type: string
+          format: date-time
+        period:
+          type: object
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        organization:
+          type: object
+          properties:
+            name:
+              type: string
+            employees:
+              type: integer
+        scope1:
+          type: object
+          properties:
+            stationary:
+              type: array
+              items:
+                $ref: "#/components/schemas/EmissionsLine"
+            mobile:
+              type: array
+              items:
+                $ref: "#/components/schemas/EmissionsLine"
+            fugitive:
+              type: array
+              items:
+                $ref: "#/components/schemas/EmissionsLine"
+            totalKg:
+              type: number
+            totalTonnes:
+              type: number
+        scope2:
+          type: object
+          description: Dual-reported per the GHG Protocol Scope 2 Guidance.
+          properties:
+            electricityKg:
+              type: number
+            heatKg:
+              type: number
+            steamKg:
+              type: number
+            gridRegion:
+              type: string
+            renewablePercentage:
+              type: number
+            locationBasedKg:
+              type: number
+              description: Grid-factor method; all electricity at the grid average.
+            marketBasedKg:
+              type: number
+              description: Contractual method; renewable-covered electricity counted as zero.
+            locationBasedTonnes:
+              type: number
+            marketBasedTonnes:
+              type: number
+            totalKg:
+              type: number
+            totalTonnes:
+              type: number
+        scope3:
+          type: object
+          properties:
+            categories:
+              type: array
+              items:
+                type: object
+                properties:
+                  category:
+                    type: integer
+                    enum: [4, 5, 6, 7]
+                  name:
+                    type: string
+                  emissionsKg:
+                    type: number
+                  emissionsTonnes:
+                    type: number
+            totalKg:
+              type: number
+            totalTonnes:
+              type: number
+        grossEmissions:
+          type: object
+          description: Scope 1 + Scope 2 (location-based) + Scope 3.
+          properties:
+            kg:
+              type: number
+            tonnes:
+              type: number
+        offsets:
+          type: object
+          properties:
+            creditsRetiredTonnes:
+              type: number
+            treeSequestrationTonnes:
+              type: number
+            totalTonnes:
+              type: number
+        netEmissions:
+          type: object
+          description: gross − offsets. Negative means a net-negative position.
+          properties:
+            kg:
+              type: number
+            tonnes:
+              type: number
+        intensity:
+          type: object
+          description: Present when organization.employees was supplied.
+          properties:
+            perEmployeeTonnes:
+              type: number
+
+    GhgFactorCatalogue:
+      type: object
+      description: Every published factor the calculator uses, so results are reproducible.
+      properties:
+        standard:
+          type: string
+        version:
+          type: string
+        scopes:
+          type: object
+          additionalProperties:
+            type: string
+        factors:
+          type: object
+          properties:
+            scope1:
+              type: object
+              properties:
+                stationary:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      unit:
+                        type: string
+                      kgCo2ePerUnit:
+                        type: number
+                mobile:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    properties:
+                      unit:
+                        type: string
+                      kgCo2ePerUnit:
+                        type: number
+                refrigerants:
+                  type: object
+                  additionalProperties:
+                    type: number
+                  description: Refrigerant global warming potential (GWP).
+            scope2:
+              type: object
+              properties:
+                gridRegions:
+                  type: object
+                  additionalProperties:
+                    type: number
+                heatKgPerKwh:
+                  type: number
+                steamKgPerKwh:
+                  type: number
+                marketBasedMethod:
+                  type: string
+            scope3:
+              type: object
+              properties:
+                freightKgPerTonneKm:
+                  type: object
+                  additionalProperties:
+                    type: number
+                wasteKgPerTonne:
+                  type: object
+                  additionalProperties:
+                    type: number
+                businessTravel:
+                  type: object
+                  additionalProperties:
+                    type: number
+                commutingKgPerKm:
+                  type: object
+                  additionalProperties:
+                    type: number
 
     HealthzResponse:
       type: object
