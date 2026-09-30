@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
 import { ExpertChatPanel } from '../ExpertChatPanel';
 
 const storageKey = 'farmcredit-expert-chat:v2';
@@ -106,5 +108,27 @@ describe('ExpertChatPanel', () => {
       vi.advanceTimersByTime(500);
     });
     expect(screen.getByRole('status')).toHaveTextContent(/conversation ready/i);
+  });
+
+  it('allows farmers to send questions about soil health and carbon farming', () => {
+    render(<ExpertChatPanel />);
+
+    const textarea = screen.getByRole('textbox', { name: /message/i });
+    const sendButton = screen.getByRole('button', { name: /send question/i });
+
+    fireEvent.change(textarea, { target: { value: 'How can I measure my soil carbon levels?' } });
+    expect(sendButton).not.toBeDisabled();
+
+    fireEvent.click(sendButton);
+    expect(screen.getByText('How can I measure my soil carbon levels?')).toBeInTheDocument();
+  });
+
+  it('allows clicking quick topic suggestions to ask questions', () => {
+    render(<ExpertChatPanel />);
+
+    const topicButton = screen.getByRole('button', { name: /^soil health$/i });
+    fireEvent.click(topicButton);
+
+    expect(screen.getAllByText('Soil health').length).toBeGreaterThan(0);
   });
 });
