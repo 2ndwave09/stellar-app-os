@@ -38,6 +38,8 @@ export interface ImpactModel3DProps {
   projects: readonly CarbonProject[];
   /** Years simulated on the timeline. */
   horizonYears?: number;
+  /** Optional project id from URL (?project=) to pre-select. */
+  initialProjectId?: string;
 }
 
 const PLOT_PX = 280;
@@ -209,8 +211,18 @@ function ReductionChart({ snapshots, year }: { snapshots: YearSnapshot[]; year: 
   );
 }
 
-export function ImpactModel3D({ projects, horizonYears = 30 }: ImpactModel3DProps) {
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? '');
+
+  export function ImpactModel3D({
+  projects,
+  horizonYears = 30,
+  initialProjectId,
+}: ImpactModel3DProps) {
+  const [projectId, setProjectId] = useState(() => {
+    if (initialProjectId && projects.some((p) => p.id === initialProjectId)) {
+      return initialProjectId;
+    }
+    return projects[0]?.id ?? '';
+  });
   const [year, setYear] = useState(Math.min(10, horizonYears));
   const [playing, setPlaying] = useState(false);
   const [view, setView] = useState(DEFAULT_VIEW);
