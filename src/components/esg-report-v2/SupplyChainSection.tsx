@@ -4,7 +4,7 @@ import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import type { BuyerComplianceReport, SupplyChainProject } from '@/lib/esg-reporting-v2';
 
-interface SupplyCh ainSectionProps {
+interface SupplyChainSectionProps {
   report: BuyerComplianceReport;
 }
 
@@ -12,7 +12,6 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
   const [expanded, setExpanded] = useState(false);
 
   const stages = project.stages;
-  const completedStages = stages.filter((s) => s.status === 'complete').length;
 
   return (
     <div className="rounded-lg border border-border bg-card">
@@ -27,12 +26,8 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
               {project.platform} • {project.assetType}
             </p>
             <div className="mt-2 flex gap-4 text-sm">
-              <span className="text-foreground">
-                {project.tonnes.toLocaleString()} t CO₂e
-              </span>
-              <span className="text-stellar-blue">
-                ${project.costPerTonUsd}/t
-              </span>
+              <span className="text-foreground">{project.tonnes.toLocaleString()} t CO₂e</span>
+              <span className="text-stellar-blue">${project.costPerTonUsd}/t</span>
               {project.retiredTonnes > 0 && (
                 <span className="text-green-600">
                   {project.retiredTonnes.toLocaleString()} t retired
@@ -54,7 +49,10 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
               <p className="text-sm font-semibold text-foreground">Co-Benefits</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 {project.coBenefits.map((benefit) => (
-                  <span key={benefit} className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-900">
+                  <span
+                    key={benefit}
+                    className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-900"
+                  >
                     {benefit}
                   </span>
                 ))}
@@ -68,7 +66,8 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
             <div className="mt-3 space-y-2">
               {stages.map((stage) => (
                 <div key={stage.stage} className="flex items-start gap-3">
-                  <div className="mt-1 h-4 w-4 flex-shrink-0 rounded-full border-2"
+                  <div
+                    className="mt-1 h-4 w-4 flex-shrink-0 rounded-full border-2"
                     style={{
                       borderColor: stage.status === 'complete' ? '#14B6E7' : '#CBD5E1',
                       backgroundColor: stage.status === 'complete' ? '#14B6E7' : 'transparent',
@@ -76,9 +75,7 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
                   />
                   <div className="flex-1 py-0.5">
                     <p className="text-sm font-medium capitalize text-foreground">{stage.stage}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {stage.detail}
-                    </p>
+                    <p className="text-xs text-muted-foreground">{stage.detail}</p>
                     {stage.at && (
                       <p className="text-xs text-muted-foreground">
                         {new Date(stage.at).toLocaleDateString('en-US')}
@@ -115,7 +112,7 @@ function SupplyChainProjectCard({ project }: { project: SupplyChainProject }) {
   );
 }
 
-export function SupplyChainSection({ report }: SupplyCh ainSectionProps) {
+export function SupplyChainSection({ report }: SupplyChainSectionProps) {
   const { supplyChain } = report;
 
   return (
