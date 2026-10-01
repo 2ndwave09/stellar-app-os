@@ -21,7 +21,7 @@ export default function SponsorReviewsPage() {
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showCalculator, setShowCalculator] = useState(false);
-  const [showProjectSearch, setShowProjectSearch] = useState(false);
+const [showProjectSearch, setShowProjectSearch] = useState(false);
   const [agreements, setAgreements] = useState<BulkPurchaseAgreement[]>([]);
   const [agreementsLoading, setAgreementsLoading] = useState(true);
   const [showAgreementForm, setShowAgreementForm] = useState(false);
