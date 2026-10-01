@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getPool } from '@/lib/db/client';
+import { getReadPool } from '@/lib/db/read-replica';
 import {
   getCohortRetentionReport,
   refreshCohortRetention,
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
   try {
     if (wallet) {
-      const summary = await getSponsorRetentionSummary(getPool(), wallet);
+      const summary = await getSponsorRetentionSummary(getReadPool(), wallet);
       if (!summary) {
         await logAuditEvent(request, action, { wallet, status: 'not_found' });
         return NextResponse.json(
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
     const maxPeriodsParam = url.searchParams.get('max_periods');
     const maxPeriods = maxPeriodsParam ? Number.parseInt(maxPeriodsParam, 10) : undefined;
 
-    const report = await getCohortRetentionReport(getPool(), {
+    const report = await getCohortRetentionReport(getReadPool(), {
       from,
       to,
       max_periods: maxPeriods && maxPeriods > 0 ? maxPeriods : undefined,
