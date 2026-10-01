@@ -139,7 +139,7 @@ export async function POST(request: Request) {
         const treeIdsQuery = `
           SELECT DISTINCT tree_id 
           FROM progress_updates 
-          WHERE id = ANY($z::bigint[])
+          WHERE id = ANY($1::bigint[])
         `;
         const treeIdsResult = await client.query(treeIdsQuery, [photosToProcess]);
         const treeIds = treeIdsResult.rows.map((r) => r.tree_id);
@@ -214,7 +214,7 @@ export async function POST(request: Request) {
         const updateRejectedQuery = `
           UPDATE progress_updates 
           SET metadata = metadata || $1::jsonb
-          WHERE id = ANY($z::bigint[])
+          WHERE id = ANY($2::bigint[])
         `;
         await client.query(updateRejectedQuery, [JSON.stringify(rejectionMetadata), photoIds]);
       }

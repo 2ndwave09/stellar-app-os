@@ -80,13 +80,13 @@ export async function GET(request: Request) {
       SELECT COUNT(DISTINCT pu.id) as total
       FROM progress_updates pu
       INNER JOIN trees t ON pu.tree_id = t.id
-      LEFT JOIN planters p ON t’s planter_id = p.id
+      LEFT JOIN planters p ON t.planter_id = p.id
       LEFT JOIN photo_hashes ph ON ph.entity_type = 'tree' 
         AND ph.entity_id = t.tree_ref
         AND ph.storage_ref = pu.media_url
       WHERE ${whereClause}
         AND pu.media_url IS NOT NULL
-        AND t’s deleted_at IS NULL
+        AND t.deleted_at IS NULL
     `;
 
     const countResult = await pool.query(countQuery, params);
@@ -121,13 +121,13 @@ export async function GET(request: Request) {
         END as "hammingDistance"
       FROM progress_updates pu
       INNER JOIN trees t ON pu.tree_id = t.id
-      LEFT JOIN planters p ON t’s planter_id = p.id
+      LEFT JOIN planters p ON t.planter_id = p.id
       LEFT JOIN photo_hashes ph ON ph.entity_type = 'tree' 
         AND ph.entity_id = t.tree_ref
         AND ph.storage_ref = pu.media_url
       WHERE ${whereClause}
         AND pu.media_url IS NOT NULL
-        AND t’s deleted_at IS NULL
+        AND t.deleted_at IS NULL
       ORDER BY 
         CASE WHEN ph.duplicate_of IS NOT NULL THEN 0 ELSE 1 END,
         pu.created_at DESC
