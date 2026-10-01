@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db/client';
+import { getReadPool } from '@/lib/db/read-replica';
 import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
@@ -23,7 +24,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   try {
     const filters = parseTreeAnalyticsFilters(new URL(request.url).searchParams);
-    const report = await getTreeAnalytics(getPool(), filters);
+    const report = await getTreeAnalytics(getReadPool(), filters);
     return NextResponse.json(report, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -47,7 +48,7 @@ export async function GET_PAYMENT_METHODS(request: Request): Promise<NextRespons
   }
   try {
     const filters = parseFarmerPaymentMethodFilters(new URL(request.url).searchParams);
-    const methods = await getFarmerPaymentMethods(getPool(), filters);
+    const methods = await getFarmerPaymentMethods(getReadPool(), filters);
     return NextResponse.json(methods, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -118,7 +119,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   }
   try {
     const input = parseFarmerIncomePredictionInput(await request.json());
-    const prediction = await getFarmerIncomePrediction(getPool(), input);
+    const prediction = await getFarmerIncomePrediction(getReadPool(), input);
     return NextResponse.json(prediction, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -142,7 +143,7 @@ export async function DELETE(request: Request): Promise<NextResponse> {
   }
   try {
     const input = parseProjectComparisonInput(await request.json());
-    const comparison = await getProjectComparison(getPool(), input);
+    const comparison = await getProjectComparison(getReadPool(), input);
     return NextResponse.json(comparison, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
