@@ -44,11 +44,11 @@ const METHOD_CURRENCY_SUPPORT: Record<PaymentMethod, PaymentCurrency[]> = {
 // Per-currency validation rules for the destination field.
 const DESTINATION_VALIDATORS: Record<PaymentCurrency, (destination: string) => string | null> = {
   XLM: (destination) =>
-    /^G[A-Z2-7]{55}$/.test(destination)
+    /^G[A-Z2-7]{56}$/.test(destination)
       ? null
       : 'destination must be a valid Stellar public key (G...) for XLM payments',
   USDC: (destination) =>
-    /^G[A-Z2-7]{55}$/.test(destination)
+    /^G[A-Z2-7]{56}$/.test(destination)
       ? null
       : 'destination must be a valid Stellar public key (G...) for USDC payments',
   FIAT: (destination) =>
@@ -132,13 +132,15 @@ function checkRateLimit(key: string): { allowed: boolean; retryAfter?: number } 
     return { allowed: false, retryAfter: blockedUntilTime - now };
   }
 
-  const timestamps = (requestTimestamps.get(key) ?? []).filter((ts) => now - ts < RATE_LIMIT_WINDOW_MS);
+  const timestamps = (requestTimestamps.get(key) ?? []).filter(
+    (ts) => now - ts < RATE_LIMIT_WINDOW_MS
+  );
 
   if (timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
     // Calculate how long until the oldest request in the window expires
     const oldestTimestamp = timestamps[0];
     const retryAfter = Math.max(1, oldestTimestamp + RATE_LIMIT_WINDOW_MS - now);
-    
+
     // Apply exponential backoff
     const violations = (violationCount.get(key) ?? 0) + 1;
     violationCount.set(key, violations);
@@ -163,7 +165,10 @@ function enforceRateLimit(request: Request): NextResponse | null {
     if (!result.allowed) {
       return NextResponse.json(
         { error: 'Too many requests, please slow down.' },
-        { status: 429, headers: { 'Retry-After': String(Math.ceil((result.retryAfter ?? 0) / 1000)) } }
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil((result.retryAfter ?? 0) / 1000)) },
+        }
       );
     }
   }
@@ -178,6 +183,73 @@ function logAudit(action: string, details: Record<string, unknown>): void {
     ...details,
   };
   console.log(`[audit] ${JSON.stringify(entry)}`);
+}
+
+// Carbon credit fractionalization - retail access
+// Minimum purchase is 1 ton instead of 100+ ton blocks.
+const MINIMUM_PURCHASE_TONS = 1;
+const MAX_FRACTIONAL_TONS = 1000000;
+
+interface FractionalizationRequest {
+  projectId: string;
+  totalTons: number;
+  minimumPurchaseTons?: number;
+}
+
+interface FractionalizationResult {
+  projectId: string;
+  totalTons: number;
+  minimumPurchaseTons: number;
+  availableUnits: number;
+  status: 'queued' | 'failed';
+  error?: string;
+}
+
+function validateFractionalization(request: FractionalizationRequest): string | null {
+  if (!request.projectId) return 'projectId is required';
+  if (!request.totalTons || request.totalTons <= 0) {
+    return 'totalTons must be greater than zero';
+  }
+  if (request.totalTons > MAX_FRACTIONAL_TONS) {
+    return `totalTons exceeds maximum of ${MAX_FRACTIONAL_TONS}`;
+  }
+  const minimum = request.minimumPurchaseTons ?? MINIMUM_PURCHASE_TONS;
+  if (minimum < MINIMUM_PURCHASE_TONS) {
+    return `minimumPurchaseTons must be at least ${MINIMUM_PURCHASE_TONS} ton`;
+  }
+  if (minimum > request.totalTons) {
+    return 'minimumPurchaseTons cannot exceed totalTons';
+  }
+  if (!Number.isInteger(minimum)) {
+    return 'minimumPurchaseTons must be a whole number of tons';
+  }
+  return null;
+}
+
+function fractionalizeProject(request: FractionalizationRequest): FractionalizationResult {
+  const validationError = validateFractionalization(request);
+  if (validationError) {
+    return {
+      projectId: request.projectId,
+      totalTons: request.totalTons,
+      minimumPurchaseTons: request.minimumPurchaseTons ?? MINIMUM_PURCHASE_TONS,
+      availableUnits: 0,
+      status: 'failed',
+      error: validationError,
+    };
+  }
+
+  const minimum = request.minimumPurchaseTons ?? MINIMUM_PURCHASE_TONS;
+  const availableUnits = Math.floor(request.totalTons / minimum);
+
+  // TODO: replace with real Stellar CARBON token minting for fractional units
+  return {
+    projectId: request.projectId,
+    totalTons: request.totalTons,
+    minimumPurchaseTons: minimum,
+    availableUnits: availableUnits,
+    status: 'queued',
+  };
 }
 
 function getEarlySponsors(platformLaunchDate: string): AirdropRecipient[] {
@@ -346,35 +418,49 @@ export async function PUT(request: Request) {
   }
 
   try {
-    const body = (await request.json()) as { payments?: FarmerPaymentRequest[] };
+    const body = (await request.json()) as {
+      payments?: FarmerPaymentRequest[];
+      fractionalization?: FractionalizationRequest;
+    };
     const payments = body.payments ?? [];
+    const fractionalization = body.fractionalization;
 
     logAudit('admin.farmer_payments.process', {
       status: 'started',
       paymentCount: payments.length,
+      hasFractionalization: Boolean(fractionalization),
     });
+
+    if (fractionalization) {
+      const result = fractionalizeProject(fractionalization);
+      logAudit('admin.fractionalization.process', {
+        status: result.status,
+        projectId: result.projectId,
+        availableUnits: result.availableUnits,
+        error: result.error,
+      });
+      if (result.status === 'failed') {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({ fractionalization: result });
+    }
 
     if (!Array.isArray(payments) || payments.length === 0) {
       logAudit('admin.farmer_payments.process', { status: 'no_payments' });
-      return NextResponse.json(
-        { error: 'payments must be a non-empty array' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'payments must be a non-empty array' }, { status: 400 });
     }
 
     const results = processFarmerPayments(payments);
-    const queued = results.filter((r) => r.status === 'queued').length;
-    const failed = results.filter((r) => r.status === 'failed').length;
 
     logAudit('admin.farmer_payments.process', {
       status: 'success',
-      queued,
-      failed,
+      queued: results.filter((r) => r.status === 'queued').length,
+      failed: results.filter((r) => r.status === 'failed').length,
     });
 
-    return NextResponse.json({ totalQueued: queued, totalFailed: failed, results });
+    return NextResponse.json({ payments: results });
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Farmer payment processing failed';
+    const message = err instanceof Error ? err.message : 'Payment processing failed';
     logAudit('admin.farmer_payments.process', { status: 'error', message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
