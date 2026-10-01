@@ -106,7 +106,7 @@ function processFarmerPayments(payments: FarmerPaymentRequest[]): FarmerPaymentR
 
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MA_REQUESTS = 100; // per window
+const RATE_LIMIT_MAX_REQUESTS = 100; // per window
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -205,9 +205,7 @@ interface FractionalizationResult {
   error?: string;
 }
 
-function validateFractionalization(
-  request: FractionalizationRequest
-): string | null {
+function validateFractionalization(request: FractionalizationRequest): string | null {
   if (!request.projectId) return 'projectId is required';
   if (!request.totalTons || request.totalTons <= 0) {
     return 'totalTons must be greater than zero';
@@ -228,9 +226,7 @@ function validateFractionalization(
   return null;
 }
 
-function fractionalizeProject(
-  request: FractionalizationRequest
-): FractionalizationResult {
+function fractionalizeProject(request: FractionalizationRequest): FractionalizationResult {
   const validationError = validateFractionalization(request);
   if (validationError) {
     return {
@@ -376,21 +372,22 @@ export async function POST(request: Request) {
     const totalCredits = recipients.length * creditsPerSponsor;
 
     const result: AirdropResult = {
-      projectId,
-      recipients,
-      totalCredits,
-      status: 'queued',
+      totalQueued: recipients.length,
+      recipients: recipients.map((recipient) => ({
+        walletAddress: recipient.walletAddress,
+        status: 'queued' as const,
+      })),
     };
 
     logAudit('admin.airdrop.execute', {
       status: 'success',
-recipientCount: recipients.length,
+      recipientCount: recipients.length,
       totalCredits,
-      totalQueued: results.totalQueued,
+      totalQueued: result.totalQueued,
       projectId,
     });
 
-    return NextResponse.json(results);
+    return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Airdrop failed';
     logAudit('admin.airdrop.execute', { status: 'error', message });
@@ -456,7 +453,7 @@ export async function PUT(request: Request) {
       failed,
     });
 
-return NextResponse.json(result);
+    return NextResponse.json(results);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Farmer payment processing failed';
     logAudit('admin.farmer_payments.process', { status: 'error', message });
