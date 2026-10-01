@@ -6,6 +6,8 @@ import { ReviewForm } from '@/app/components/reviews/ReviewForm';
 import { ReviewCard } from '@/app/components/reviews/ReviewCard';
 import { TeamReviewSummary } from '@/app/components/reviews/TeamReviewSummary';
 import { Review, ReviewSummary } from '@/lib/types/review';
+import { CarbonOffsetCalculator } from '@/app/components/carbon/CarbonOffsetCalculator';
+import { OffsetProjectSearch } from '@/app/components/carbon/OffsetProjectSearch';
 
 export default function SponsorReviewsPage() {
   const params = useParams();
@@ -15,6 +17,8 @@ export default function SponsorReviewsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [showProjectSearch, setShowProjectSearch] = useState(false);
 
   useEffect(() => {
     fetchReviews();
@@ -76,6 +80,25 @@ export default function SponsorReviewsPage() {
           {showForm ? 'Cancel' : 'Write Review'}
         </button>
       </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={() => setShowProjectSearch(!showProjectSearch)}
+          className="px-4 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          {showProjectSearch ? 'Hide Project Search' : 'Search Offset Projects'}
+        </button>
+        <button
+          onClick={() => setShowCalculator(!showCalculator)}
+          className="px-4 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+        >
+          {showCalculator ? 'Hide Carbon Calculator' : 'Calculate My Carbon Offset'}
+        </button>
+      </div>
+
+      {showProjectSearch && <OffsetProjectSearch />}
+
+      {showCalculator && <CarbonOffsetCalculator />}
 
       {summary && <TeamReviewSummary summary={summary} />}
 

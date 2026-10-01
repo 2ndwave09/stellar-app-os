@@ -31,7 +31,7 @@ Contracts panic with a descriptive string on invalid input. The Stellar SDK surf
 
 | Panic message | Meaning |
 |---|---|
-| `"already initialized"| `initialize` called more than once |
+| `"already initialized"` | `initialize` called more than once |
 | `"amount must be positive"` | `amount ≤ 0` passed to `deposit` |
 | `"active escrow already exists for this farmer"` | Duplicate `deposit` for same farmer |
 | `"no escrow for farmer"` / `"no escrow found for farmer"` | Farmer address has no escrow record |
@@ -420,37 +420,6 @@ Returns the full escrowed amount to the donor. Only callable before planting is 
 
 State machine: `Funded → Planted → Survived → Completed` (or `Funded → Refunded`)
 
-**Time-Locked Milestones (#494):** Funds are released in 3 tranches:
-- Tranche 1 (30%) at planting verification
-- Tranche 2 (40%) at 6-month survival check
-- Tranche 3 (30%) at 1-year milestone
-
-**Minimum Planting Density Rule (#514):** For jobs with `area_hectares` ≥ `job_size_threshold`, the contract enforces a minimum planting density of `min_density` trees per hectare. Small jobs below the threshold are exempt from density rules.
-
-**Planter Rating System (#483):** After job completion, sponsors can rate planters (1-5 stars). Ratings are stored on-chain and aggregated into a reputation score (0-100) to track planter performance over time.
-
-**Minimum Planting Density Rule (#514):** For jobs with `area_hectares` ≥ `job_size_threshold`, the contract enforces a minimum planting density of `min_density` trees per hectare. Small jobs below the threshold are exempt from density rules.
-
-### `initialize`
-
-One-time setup. Must be called before any other function.
-
-**Auth:** deployer (anyone, once)
-
-| Parameter | Type | Description |
-|---|---|---|
-| `admin` | `Address` | Address that will act as verifier/admin |
-| `tree_token` | `Address` | TREE token contract address |
-| `oracle` | `Address` | Oracle address for survival reports |
-| `survival_threshold_percent` | `u32` | Minimum survival rate (0..=100) for Tranche 2 |
-| `min_density` | `i128` | Minimum trees per hectare for large jobs |
-| `job_size_threshold` | `i128` | Minimum job size (hectares) for density rules |
-
-**Returns:** `void`
-
-**Errors:** panics with `"already initialized"` if called again.
-
-```bash
 stellar contract invoke \
   --id $CONTRACT_ID --network testnet --source deployer \
   -- initialize \
@@ -460,139 +429,24 @@ stellar contract invoke \
     --survival_threshold_percent 70 \
     --min_density 1000 \
     --job_size_threshold 10
-```
 
-```ts
-await client.initialize({
-  admin: adminAddress,
-  tree_token: treeTokenAddress,
-  oracle: oracleAddress,
-  survival_threshold_percent: 70,
-  min_density: 1000,
-  job_size_threshold: 10,
-});
-```
-
----
-
-### `deposit`
-
-Donor deposits funds into escrow for a specific farmer. Transfers `amount` of `token` from `donor` into the contract.
-
-**Auth:** `donor` (caller-auth)
-
-| Parameter | Type | Description |
-|---|---|---|
-| `donor` | `Address` | Address funding the escrow |
-| `farmer` | `Address` | Beneficiary farmer address |
-| `token` | `Address` | SAC token contract address (e.g. USDC) |
-| `amount` | `i128` | Amount in token's smallest unit (must be > 0) |
-| `tree_count` | `i128` | Number of trees to be planted (must be > 0) |
-| `area_hectares` | `i128` | Planting area in hectares (must be > 0) |
-
-**Returns:** `void`
-
-**Events emitted:** `DonationReceived(donor, farmer) → (amount, token)`**
-**Errors:**
--  `"amount must be positive"` — `amount ≤ 0`
--  `"active escrow already exists for this farmer"` — farmer already has an open escrow
--  `"planting density below minimum for job size"` — Job area meets threshold but density is too low
--  `"area hectares must be positive"` — `area_hectares ≤ 0`
-
-```bash
-stellar contract invoke \
-  --id $CONTRACT_ID --network testnet --source donor \
-  -- deposit \
-    --donor GDONOR... \
-    --farmer GFARMER... \
-    --token GUSDC... \
-    --amount 10000000 \
-    --tree_count 5000 \
-    --area_hectares 5
-```
-
-```ts
-await client.deposit({
-  donor: donorAddress,
-  farmer: farmerAddress,
-  token: usdcAddress,
-  amount: BigInt(10_000_000), // 1 USDC (decimals)
-  tree_count: BigInt(5_000),
-  area_hectares: BigInt(5),
-});
-```
-
----
-
-### `verify_planting`
-Admin confirms GPS + photo proof of planting. Releases **Tranche 1 (30%)** of escrowed funds to the farmer immediately and mints TREE tokens.
-
-**Auth:** admin-only
-
-| Parameter | Type | Description |
-|---|---|---|
-| `farmer` | `Address` | Farmer whose escrow to update |
-| `proof_hash` | `BytesN32>` | SHA-256 of the GPS + photo proof payload |
-
-**Returns:** `void`
-
-**Events emitted:** `PlantingVerified(farmer) → (tranche1_amount, proof_hash)`
+### `register_project`
 
 **Errors:**
--  `"planting already verified or escrow not active"` — status is not `Funded`
--  `"no escrow for farmer"` — no escrow record found
-
-```bash
-stellar contract invoke \
-  --id $CONTRACT_ID --network testnet --source admin \
-  -- verify_planting \
-    --farmer GFARMER... \
-    --proof_hash aabbbc...  # 32-byte hex
-```
-
-```ts
-const proofHash = Buffer.from(sha256(proofPayload));
-await client.verify_planting({
-  farmer: farmerAddress,
-  proof_hash: proofHash,
-});
-```
-
----
-
-### `verify_survival`
-Admin confirms 6-month survival check. Releases **Tranche 2 (40%)** to the farmer. Enforces that at least 6 months (≈ 26 weeks) have elapsed since `verify_planting` and survival rate meets threshold.
-
-**Auth:** admin-only
-
-| Parameter | Type | Description |
-|---|---|---|
-| `farmer` | `Address` | Farmer whose escrow to update |
-| `proof_hash` | `BytesN32>` | SHA-256 of the survival proof payload |
-| `survival_rate_percent` | `u32` | Survival rate (0..=100) |
-
-**Returns:** `void`
-
-**Events emitted:** `SurvivalVerified(farmer) → (tranche2_amount, proof_hash)`
+- `"co2_scaled must be positive"` — `co2_scaled ≤ 0`
+- `"maturity_years must be > 0"` — `maturity_years = 0`
 
 **Errors:**
--  `"planting not yet verified"` — status is not `Planted`
--  `"6-month survival period not yet elapsed"` — called too early
--  `"survival rate below minimum"` — survival rate below configured threshold
--  `"nothing left to release"` — released amount already equals total
+- `"planting not yet verified"` — status is not `Planted`
+- `"6-month survival period not yet elapsed"` — called too early
+- `"survival rate below minimum"` — survival rate below configured threshold
+- `"nothing left to release"` — released amount already equals total
 
-```ts
 await client.verify_survival({
   farmer: farmerAddress,
   proof_hash: survivalProofHash,
   survival_rate_percent: 70,
 });
-```
-
----
-
-### `verify_year_milestone`
-Admin confirms 1-milestone. Releases **Tranche 3 (30%)** to the farmer. Enforces that at least 1 year (≈ 52 weeks) has elapsed since `verify_planting`.
 
 **Auth:** admin-only
 
@@ -600,37 +454,32 @@ Admin confirms 1-milestone. Releases **Tranche 3 (30%)** to the farmer. Enforces
 |---|---|---|
 | `farmer` | `Address` | Farmer whose escrow to complete |
 | `proof_hash` | `BytesN32>` | SHA-256 of the year milestone proof payload |
+| `project_id` | `u64` | Unique project identifier |
+| `total_tons` | `i128` | Total CO2-e tonnage available (must be > 0) |
+| `fractional_enabled` | `bool` | Whether retail 1-ton purchases are allowed |
 
-**Returns:** `void`
+### `purchase_credits`
 
-**Events emitted:** `YearMilestone(farmer) → (tranche3_amount, proof_hash)`**
-**Errors:**
--  `"survival not yet verified"` — status is not `Survived`
--  `"1-year milestone period not yet elapsed"` — called too early
--  `"nothing left to release"` — released amount already equals total
-
-```ts
 await client.verify_year_milestone({
   farmer: farmerAddress,
   proof_hash: yearMilestoneProofHash,
 });
-```
-
----
-
-### `refund`
-Returns the full escrowed amount to the donor. Only callable before planting is verified.
-
-**Auth:** admin-only
 
 | Parameter | Type | Description |
 |---|---|---|
+| `buyer` | `Address` | Address paying for the credits |
+| `project_id` | `u64` | Project to purchase from |
+| `tons` | `i128` | Number of tons to buy (must be ≥ 1) |
+| `token` | `Address` | SAC token contract for payment |
 | `farmer` | `Address` | Farmer whose escrow to refund |
 
 **Returns:** `void`
 
 **Events emitted:** `DonationRefunded(farmer) → (amount, token)`
-
 **Errors:**
--  `"cannot refund after planting verified"` — status is not `Funded`
--  `"no escrow for farmer"` — no escrow record found
+await client.purchase_credits({
+  buyer: buyerAddress,
+  project_id: BigInt(1),
+  tons: BigInt(1),
+  token: usdcAddress,
+});

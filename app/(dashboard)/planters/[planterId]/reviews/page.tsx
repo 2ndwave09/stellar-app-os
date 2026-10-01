@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { ReviewCard } from '@/app/components/reviews/ReviewCard';
 import { TeamReviewSummary } from '@/app/components/reviews/TeamReviewSummary';
 import { Review, ReviewSummary } from '@/lib/types/review';
+import { CarbonOffsetCalculator } from '@/app/components/carbon/CarbonOffsetCalculator';
 
 export default function PlanterReviewsPage() {
   const params = useParams();
@@ -46,6 +47,8 @@ export default function PlanterReviewsPage() {
       <h1 className="text-2xl font-bold text-gray-900">Your Reviews</h1>
 
       {summary && <TeamReviewSummary summary={summary} />}
+
+      <CarbonOffsetCalculator />
 
       <div className="space-y-4">
         {reviews.length === 0 ? (
