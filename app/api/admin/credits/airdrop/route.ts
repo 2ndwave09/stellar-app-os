@@ -106,7 +106,7 @@ function processFarmerPayments(payments: FarmerPaymentRequest[]): FarmerPaymentR
 
 // Rate limiting configuration
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 100; // per window
+const RATE_LIMIT_MA_REQUESTS = 100; // per window
 const BASE_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -205,7 +205,9 @@ interface FractionalizationResult {
   error?: string;
 }
 
-function validateFractionalization(request: FractionalizationRequest): string | null {
+function validateFractionalization(
+  request: FractionalizationRequest
+): string | null {
   if (!request.projectId) return 'projectId is required';
   if (!request.totalTons || request.totalTons <= 0) {
     return 'totalTons must be greater than zero';
@@ -226,7 +228,9 @@ function validateFractionalization(request: FractionalizationRequest): string | 
   return null;
 }
 
-function fractionalizeProject(request: FractionalizationRequest): FractionalizationResult {
+function fractionalizeProject(
+  request: FractionalizationRequest
+): FractionalizationResult {
   const validationError = validateFractionalization(request);
   if (validationError) {
     return {
@@ -251,7 +255,6 @@ function fractionalizeProject(request: FractionalizationRequest): Fractionalizat
     status: 'queued',
   };
 }
-
 function getEarlySponsors(platformLaunchDate: string): AirdropRecipient[] {
   const launch = new Date(platformLaunchDate);
   const cutoff = new Date(launch);
@@ -370,26 +373,19 @@ export async function POST(request: Request) {
     }
 
     const recipients = getEarlySponsors(platformLaunchDate);
+    const totalCredits = recipients.length * creditsPerSponsor;
 
-    if (recipients.length === 0) {
-      logAudit('admin.airdrop.execute', { status: 'no_eligible_sponsors' });
-      return NextResponse.json(
-        { error: 'No eligible sponsors found for the given launch date' },
-        { status: 400 }
-      );
-    }
-
-    // TODO: replace with real Stellar CARBON token transfer per recipient wallet
-    const results: AirdropResult = {
-      totalQueued: recipients.length,
-      recipients: recipients.map((r) => ({
-        walletAddress: r.walletAddress,
-        status: 'queued' as const,
-      })),
+    const result: AirdropResult = {
+      projectId,
+      recipients,
+      totalCredits,
+      status: 'queued',
     };
 
     logAudit('admin.airdrop.execute', {
       status: 'success',
+recipientCount: recipients.length,
+      totalCredits,
       totalQueued: results.totalQueued,
       projectId,
     });
@@ -451,16 +447,18 @@ export async function PUT(request: Request) {
     }
 
     const results = processFarmerPayments(payments);
+    const queued = results.filter((r) => r.status === 'queued').length;
+    const failed = results.filter((r) => r.status === 'failed').length;
 
     logAudit('admin.farmer_payments.process', {
       status: 'success',
-      queued: results.filter((r) => r.status === 'queued').length,
-      failed: results.filter((r) => r.status === 'failed').length,
+      queued,
+      failed,
     });
 
-    return NextResponse.json({ payments: results });
+return NextResponse.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Payment processing failed';
+    const message = err instanceof Error ? err.message : 'Farmer payment processing failed';
     logAudit('admin.farmer_payments.process', { status: 'error', message });
     return NextResponse.json({ error: message }, { status: 500 });
   }

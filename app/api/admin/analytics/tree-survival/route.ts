@@ -105,7 +105,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: message }, { status });
   }
 }
-
 /**
  * PATCH /api/admin/analytics/tree-survival
  *
@@ -124,7 +123,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to predict farmer income';
-    const status = /must be1required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
     console.error('[farmer-income-prediction]', error);
     return NextResponse.json({ error: message }, { status });
   }
