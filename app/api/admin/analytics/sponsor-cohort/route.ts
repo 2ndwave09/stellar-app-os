@@ -18,6 +18,11 @@ export const dynamic = 'force-dynamic';
  * Returns the sponsor cohort retention matrix.
  *
  * Query params:
+ *   from           - filter cohorts from this month (YYYY-MM)
+ *   to             - filter cohorts up to this month (YYYY-MM)
+ *   max_periods    - max period offsets to include (default 12)
+ *   wallet         - if provided, returns a single sponsor's retention summary instead
+ *   payment_method - optional filter by payment method (e.g. 'xlm' for Stellar)
  *   from       - filter cohorts from this month (YYYY-MM)
  *   to         - filter cohorts up to this month (YYYY-MM)
  *   max_periods - max period offsets to include (default 12)
