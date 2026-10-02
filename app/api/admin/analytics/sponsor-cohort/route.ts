@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { getPool } from '@/lib/db/client';
+import { getReadPool } from '@/lib/db/read-replica';
 import {
   getCohortRetentionReport,
   refreshCohortRetention,
@@ -31,7 +32,7 @@ export async function GET(request: Request) {
 
   try {
     if (wallet) {
-      const summary = await getSponsorRetentionSummary(getPool(), wallet);
+      const summary = await getSponsorRetentionSummary(getReadPool(), wallet);
       if (!summary) {
         await logAuditEvent(request, action, { wallet, status: 'not_found' });
         return NextResponse.json(
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
     const maxPeriodsParam = url.searchParams.get('max_periods');
     const maxPeriods = maxPeriodsParam ? Number.parseInt(maxPeriodsParam, 10) : undefined;
 
-    const report = await getCohortRetentionReport(getPool(), {
+    const report = await getCohortRetentionReport(getReadPool(), {
       from,
       to,
       max_periods: maxPeriods && maxPeriods > 0 ? maxPeriods : undefined,
@@ -82,7 +83,7 @@ async function generate1099Forms(pool: any) {
       SUM(sp.amount) AS total_annual
     FROM sponsors s
     JOIN sponsorships sp ON sp.sponsor_id = s.id
-    WHERE sp.created_at >= NOW() - INTERVAL '1 year'
+WHERE sp.created_at >= NOW() - INTERVAL '1 year'
     GROUP BY s.id, s.name, s.email
     HAVING SUM(sp.amount) > 20000
   `);
@@ -303,7 +304,7 @@ async function logAuditEvent(request: Request, action: string, details: Record<s
     const actor = request.headers.get('x-admin-user') || request.headers.get('x-user-id') || 'unknown';
     await pool.query(
       `INSERT INTO admin_audit_log (actor_id, action, resource, details, created_at)
-       VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOT())
+VALUES ($1, $2, 'sponsor-cohort-analytics', $3::jsonb, NOW())
       `,
       [actor, action, JSON.stringify(details)]
     );

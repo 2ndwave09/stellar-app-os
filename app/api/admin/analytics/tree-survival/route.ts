@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db/client';
+import { getReadPool } from '@/lib/db/read-replica';
 import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
+import { getProjectComparison, parseProjectComparisonInput } from '@/lib/analytics/project-comparison';
 import { getFarmerIncomePrediction, parseFarmerIncomePredictionInput } from '@/lib/analytics/farmer-income';
 import { getComplianceReport, parseComplianceReportInput } from '@/lib/analytics/compliance-report';
 
@@ -22,7 +24,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   try {
     const filters = parseTreeAnalyticsFilters(new URL(request.url).searchParams);
-    const report = await getTreeAnalytics(getPool(), filters);
+    const report = await getTreeAnalytics(getReadPool(), filters);
     return NextResponse.json(report, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -46,7 +48,7 @@ export async function GET_PAYMENT_METHODS(request: Request): Promise<NextRespons
   }
   try {
     const filters = parseFarmerPaymentMethodFilters(new URL(request.url).searchParams);
-    const methods = await getFarmerPaymentMethods(getPool(), filters);
+    const methods = await getFarmerPaymentMethods(getReadPool(), filters);
     return NextResponse.json(methods, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -105,7 +107,6 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: message }, { status });
   }
 }
-
 /**
  * PATCH /api/admin/analytics/tree-survival
  *
@@ -118,13 +119,13 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   }
   try {
     const input = parseFarmerIncomePredictionInput(await request.json());
-    const prediction = await getFarmerIncomePrediction(getPool(), input);
+    const prediction = await getFarmerIncomePrediction(getReadPool(), input);
     return NextResponse.json(prediction, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to predict farmer income';
-    const status = /must be1required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
+    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
     console.error('[farmer-income-prediction]', error);
     return NextResponse.json({ error: message }, { status });
   }
@@ -133,24 +134,23 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 /**
  * DELETE /api/admin/analytics/tree-survival
  *
- * Generates a regulatory compliance report for SEC, EPA, and carbon tax
- * requirements, including automatic calculation of offsets vs. emissions for
- * regulatory filings.
+ * Compares multiple offset projects side-by-side: price, co-benefits,
+ * methodology, verifier, risk rating, and buyer reviews.
  */
 export async function DELETE(request: Request): Promise<NextResponse> {
   if (!(await isAdminRequest())) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   try {
-    const input = parseComplianceReportInput(await request.json());
-    const report = await getComplianceReport(getPool(), input);
-    return NextResponse.json(report, {
+    const input = parseProjectComparisonInput(await request.json());
+    const comparison = await getProjectComparison(getReadPool(), input);
+    return NextResponse.json(comparison, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to generate compliance report';
-    const status = /must be|required|invalid|unsupported|non-negative/.test(message) ? 400 : 500;
-    console.error('[compliance-report]', error);
+    const message = error instanceof Error ? error.message : 'Failed to compare projects';
+    const status = /must be|required|invalid|at least two|unsupported/.test(message) ? 400 : 500;
+    console.error('[project-comparison]', error);
     return NextResponse.json({ error: message }, { status });
   }
 }

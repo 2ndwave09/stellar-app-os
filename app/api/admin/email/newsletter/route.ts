@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { sendSegmentedNewsletter, type NewsletterRecipient } from '@/lib/email/sendgrid';
-import { processFarmerPayments, type PaymentRequest, type PaymentCurrency, type PaymentMethod } from '@/lib/payments/farmer-payments';
+import { processFarmerPayments, type PaymentRequest, type PaymentCurrency, type PaymentMethod, type PaymentResult } from '@/lib/payments/farmer-payments';
 import { auditLog } from '@/lib/audit';
 
 export const runtime = 'nodejs';
@@ -49,19 +49,22 @@ export async function PUT(request: Request) {
       !payment?.farmerId ||
       !CURRENCIES.has(payment.currency) ||
       !METHODS.has(payment.method) ||
+      !payment.destination ||
       typeof payment.amount !== 'number' ||
       payment.amount <= 0,
     );
     if (invalid) {
       await auditLog('admin.payments.invalid_request', { adminEmail, error: 'Invalid payment entry', payment: invalid });
       return NextResponse.json(
-        { error: 'each payment requires farmerId, a positive amount, and a supported currency (XLM, USDC, FIAT) and method (bank_transfer, crypto_wallet, payment_app)' },
+        { error: 'each payment requires farmerId, a destination, a positive amount, and a supported currency (XLM, USDC, FIAT) and method (bank_transfer, crypto_wallet, payment_app)' },
         { status: 400 },
       );
     }
     const results = await processFarmerPayments(body.payments);
     await auditLog('admin.payments.processed', { adminEmail, paymentCount: body.payments.length, results });
-    return NextResponse.json({ results });
+    const failed = (results as PaymentResult[]).filter((result) => result.status === 'failed');
+    const status = failed.length === 0 ? 200 : failed.length === results.length ? 502 : 207;
+    return NextResponse.json({ results, failedCount: failed.length }, { status });
   } catch (error) {
     await auditLog('admin.payments.error', { adminEmail, error: error instanceof Error ? error.message : 'Unknown error' });
     return NextResponse.json({ error: 'Invalid payment request' }, { status: 400 });

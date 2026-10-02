@@ -251,7 +251,6 @@ function fractionalizeProject(request: FractionalizationRequest): Fractionalizat
     status: 'queued',
   };
 }
-
 function getEarlySponsors(platformLaunchDate: string): AirdropRecipient[] {
   const launch = new Date(platformLaunchDate);
   const cutoff = new Date(launch);
@@ -370,31 +369,25 @@ export async function POST(request: Request) {
     }
 
     const recipients = getEarlySponsors(platformLaunchDate);
+    const totalCredits = recipients.length * creditsPerSponsor;
 
-    if (recipients.length === 0) {
-      logAudit('admin.airdrop.execute', { status: 'no_eligible_sponsors' });
-      return NextResponse.json(
-        { error: 'No eligible sponsors found for the given launch date' },
-        { status: 400 }
-      );
-    }
-
-    // TODO: replace with real Stellar CARBON token transfer per recipient wallet
-    const results: AirdropResult = {
+    const result: AirdropResult = {
       totalQueued: recipients.length,
-      recipients: recipients.map((r) => ({
-        walletAddress: r.walletAddress,
+      recipients: recipients.map((recipient) => ({
+        walletAddress: recipient.walletAddress,
         status: 'queued' as const,
       })),
     };
 
     logAudit('admin.airdrop.execute', {
       status: 'success',
-      totalQueued: results.totalQueued,
+      recipientCount: recipients.length,
+      totalCredits,
+      totalQueued: result.totalQueued,
       projectId,
     });
 
-    return NextResponse.json(results);
+    return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Airdrop failed';
     logAudit('admin.airdrop.execute', { status: 'error', message });
@@ -451,16 +444,18 @@ export async function PUT(request: Request) {
     }
 
     const results = processFarmerPayments(payments);
+    const queued = results.filter((r) => r.status === 'queued').length;
+    const failed = results.filter((r) => r.status === 'failed').length;
 
     logAudit('admin.farmer_payments.process', {
       status: 'success',
-      queued: results.filter((r) => r.status === 'queued').length,
-      failed: results.filter((r) => r.status === 'failed').length,
+      queued,
+      failed,
     });
 
-    return NextResponse.json({ payments: results });
+    return NextResponse.json(results);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Payment processing failed';
+    const message = err instanceof Error ? err.message : 'Farmer payment processing failed';
     logAudit('admin.farmer_payments.process', { status: 'error', message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
