@@ -5,3 +5,4 @@
  */
 
 export { exportUserData, deleteUserData } from '@/lib/gdpr';
+export { deleteUserData, exportUserData, getUserDataForExport } from '@/lib/gdpr';

@@ -1,9 +1,11 @@
 /**
- * POST /api/v2/marketplace/recommendations — Issue #1430
+ * POST /api/v2/marketplace/recommendations — Issue #1306
  *
  * Returns offset projects ranked for a buyer profile (industry, company size,
  * past purchases, co-benefit preferences and budget). Scoring lives in
  * `lib/marketplace/buyerRecommendations.ts` so the UI and API agree.
+ *
+ * Closes #1306
  */
 
 import { NextResponse } from 'next/server';
