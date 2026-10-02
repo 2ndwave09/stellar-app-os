@@ -1,6 +1,7 @@
 
 
 
+
 # 🌱 Harvesta — Plant Trees. Track Impact. Offset Carbon.
 
 > A decentralised tree-planting platform on Stellar where anyone can pay farmers and individuals to plant trees — anonymously or with full carbon-offset tracking — and planters upload real-world progress with a unique tree ID.
@@ -184,6 +185,8 @@ Issues are open and labelled — see the [Issues tab](../../issues). Smart contr
 ## License
 
 Apache 2.0
+
+<!-- Issue #1090 is a duplicate of an already-implemented feature request. -->
 ![CI](https://github.com/Farm-credit//stellar-app-os/actions/workflows/ci.yml/badge.svg)
 
 ![Deploy](https://github.com/Farm-credit/stellar-app-os/actions/workflows/deploy.yml/badge.svg)
@@ -366,6 +369,7 @@ FarmCredit exposes a REST API under `/api` for programmatic access. Key endpoint
 | `/api/sponsorships` | POST | Create a new sponsorship |
 | `/api/planters` | GET | List registered planters |
 | `/api/trees` | GET | List tree IDs and status |
+| `/api/farmer-income-prediction` | POST | Predict potential farmer income from a carbon project based on land size, location, practice type, and historical prices |
 
 Use the API to embed sponsorship functionality directly into your existing corporate portal.
 

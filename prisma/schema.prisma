@@ -47,3 +47,56 @@ model PlantingLocation {
   @@index([latitude, longitude])
   @@map("planting_locations")
 }
+
+// Carbon methodology library (migration 025). Reference catalogue of calculation
+// methodologies; seeded from data/carbon-methodologies/*.json.
+model CarbonMethodology {
+  slug             String   @id
+  code             String
+  name             String
+  category         String   // reforestation | soil_sequestration | renewable_energy | methane_reduction | energy_efficiency
+  standard         String
+  version          String?
+  description      String   @db.Text
+  formula          String   @db.Text
+  parameters       Json     @default("[]")
+  applicability    String[]
+  sourceRef        String   @map("source_ref") @db.Text
+  metadataVerified Boolean  @default(false) @map("metadata_verified")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("carbon_methodologies")
+  @@index([category])
+  @@index([standard])
+}
+
+// ── ProjectRiskScore ────────────────────────────────────────────────────────
+//
+// Buyer risk scores for carbon credit projects (Issue #1294).
+// Calculated from verifier reputation, methodology strength, regional stability,
+// and farmer track record. Persisted for auditability and caching.
+//
+// Schema is for documentation; production uses raw SQL migrations (see note above).
+model ProjectRiskScore {
+  id                          String   @id @default(cuid())
+  projectId                   String   @unique
+  overallScore                Int      // 0-100
+  riskRating                  String   // 'Low' | 'Medium' | 'High'
+  verifierReputationScore     Int      // 0-100
+  methodologyStrengthScore    Int      // 0-100
+  regionalStabilityScore      Int      // 0-100
+  farmerTrackRecordScore      Int      // 0-100
+  
+  // Data gap documentation (for transparency)
+  dataGaps                    String[]
+  
+  // Metadata
+  calculatedAt                DateTime @default(now()) @map("calculated_at")
+  updatedAt                   DateTime @updatedAt @map("updated_at")
+
+  @@index([projectId])
+  @@index([riskRating])
+  @@index([updatedAt])
+  @@map("project_risk_scores")
+}

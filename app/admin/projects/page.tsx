@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Badge } from '@/components/atoms/Badge';
@@ -17,6 +17,12 @@ import {
 import { mockAdminProjectDetails } from '@/lib/api/mock/adminProjectDetails';
 
 export default function AdminProjectsPage(): ReactNode {
+  const [projectType, setProjectType] = useState('');
+  const [location, setLocation] = useState('');
+  const [coBenefits, setCoBenefits] = useState<string[]>([]);
+  const [certification, setCertification] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: mockAdminProjectDetails.length,
@@ -24,6 +30,35 @@ export default function AdminProjectsPage(): ReactNode {
     estimateSize: () => 180,
     overscan: 5,
   });
+
+  const filteredProjects = useMemo(() => {
+    return mockAdminProjectDetails.filter((project) => {
+      if (projectType && project.type !== projectType) return false;
+      if (location && project.country !== location) return false;
+      if (certification && project.certificationStandard !== certification) return false;
+      if (coBenefits.length > 0) {
+        const projectBenefits = project.coBenefits ?? [];
+        if (!coBenefits.every((benefit) => projectBenefits.includes(benefit))) return false;
+      }
+      const price = project.pricePerTonne ?? 0;
+      if (minPrice && price < Number(minPrice)) return false;
+      if (maxPrice && price > Number(maxPrice)) return false;
+      return true;
+    });
+  }, [projectType, location, coBenefits, certification, minPrice, maxPrice]);
+
+  const projectTypes = useMemo(
+    () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.type))),
+    []
+  );
+  const locations = useMemo(
+    () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.country))),
+    []
+  );
+  const certifications = useMemo(
+    () => Array.from(new Set(mockAdminProjectDetails.map((p) => p.certificationStandard))),
+    []
+  );
 
   return (
     <div className="container mx-auto max-w-7xl px-4 py-8 sm:py-10">
@@ -40,7 +75,7 @@ export default function AdminProjectsPage(): ReactNode {
       <div ref={scrollRef} className="overflow-auto" style={{ height: '600px' }}>
         <div className="relative" style={{ height: `${virtualizer.getTotalSize()}px` }}>
           {virtualizer.getVirtualItems().map((virtualItem) => {
-            const project = mockAdminProjectDetails[virtualItem.index];
+            const project = filteredProjects[virtualItem.index];
             return (
               <div
                 key={virtualItem.key}

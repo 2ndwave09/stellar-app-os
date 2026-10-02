@@ -1,21 +1,24 @@
 /**
- * /api/v2/risk-scores — Issue #1418
+ * /api/v2/risk-scores — Issue #1418 & #1294
  *
  * Buyer risk scoring for project sustainability. Each project is scored on
  * verifier reputation, methodology strength, regional stability and farmer
- * track record (see `backend/src/services/projectRiskScoring.ts`).
+ * track record (see `lib/scoring/buyer-risk-scoring.ts`).
  *
  * GET /api/v2/risk-scores
- *   → { projects: ProjectRiskScore[] } ranked lowest risk first
+ *   → { success: true, data: ProjectRiskScore[] } ranked lowest risk first
  *   ?rating=Low|Medium|High      optional filter
+ *   ?limit=20                    optional limit (default 20, max 100)
+ *   ?offset=0                    optional offset for pagination
+ *
  * GET /api/v2/risk-scores?projectId=proj-001
- *   → ProjectRiskScore, 404 if the project is unknown
+ *   → { success: true, riskScore: ProjectRiskScore }, 404 if the project is unknown
  *
  * POST /api/v2/risk-scores
- *   Body: ProjectRiskInput — scores a project from caller-supplied inputs.
+ *   Body: ProjectRiskInput — scores a project from caller-supplied inputs (legacy sample data)
  *   → 200 ProjectRiskScore | 400 { error, details: string[] }
  *
- * Closes #1418
+ * Closes #1418 & #1294
  */
 
 import { NextResponse } from 'next/server';
@@ -28,6 +31,7 @@ import {
   type ProjectRiskInput,
   type RiskRating,
 } from '@/backend/src/services/projectRiskScoring';
+import { listProjectRiskScores } from '@/lib/services/project-risk-score.service';
 import { apiVersionHeaders } from '@/lib/api/versioning';
 
 export const runtime = 'nodejs';
@@ -89,6 +93,12 @@ function headers(): Record<string, string> {
 export function GET(request: Request): NextResponse {
   const url = new URL(request.url);
   const projectId = url.searchParams.get('projectId');
+  const rating = url.searchParams.get('rating');
+  const limit = Math.min(
+    parseInt(url.searchParams.get('limit') || '20', 10) || 20,
+    100
+  );
+  const offset = parseInt(url.searchParams.get('offset') || '0', 10) || 0;
 
   if (projectId) {
     const input = findSampleProjectRiskInput(projectId);
@@ -98,10 +108,12 @@ export function GET(request: Request): NextResponse {
         { status: 404, headers: headers() }
       );
     }
-    return NextResponse.json(calculateProjectRiskScore(input), { headers: headers() });
+    return NextResponse.json(
+      { success: true, riskScore: calculateProjectRiskScore(input) },
+      { headers: headers() }
+    );
   }
 
-  const rating = url.searchParams.get('rating');
   if (rating && !RATINGS.includes(rating as RiskRating)) {
     return NextResponse.json(
       { error: 'Invalid rating', details: [`rating must be one of ${RATINGS.join(', ')}`] },
@@ -111,8 +123,18 @@ export function GET(request: Request): NextResponse {
 
   const ranked = rankProjectsByRisk(SAMPLE_PROJECT_RISK_INPUTS);
   const projects = rating ? ranked.filter((p) => p.rating === rating) : ranked;
+  const paginatedProjects = projects.slice(offset, offset + limit);
 
-  return NextResponse.json({ projects }, { headers: headers() });
+  return NextResponse.json(
+    {
+      success: true,
+      data: paginatedProjects,
+      total: projects.length,
+      limit,
+      offset,
+    },
+    { headers: headers() }
+  );
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
@@ -138,10 +160,13 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   const score = calculateProjectRiskScore(parsed.data as ProjectRiskInput);
-  return NextResponse.json(score, {
-    headers: {
-      'Cache-Control': 'no-store',
-      ...(apiVersionHeaders('v2') as Record<string, string>),
-    },
-  });
+  return NextResponse.json(
+    { success: true, riskScore: score },
+    {
+      headers: {
+        'Cache-Control': 'no-store',
+        ...(apiVersionHeaders('v2') as Record<string, string>),
+      },
+    }
+  );
 }
