@@ -136,12 +136,15 @@ export async function GET(request: Request) {
 
     params.push(limit, offset);
 
-    const photosResult = await pool.query<VerificationPhoto>(photosQuery, params);
+    const photosResult = await pool.query<VerificationPhoto>(
+      photosQuery,
+      params
+    );
 
     // Get filter options
     const regionsQuery = `
       SELECT DISTINCT region FROM trees 
-      WHERE deleted_at IS NULL 
+      WHERE deleted_at IS NULL
       ORDER BY region
     `;
     const regionsResult = await pool.query(regionsQuery);

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db/client';
 import { isAdminRequest } from '@/lib/auth/admin';
-import { emitTreePaymentEvent } from '@/lib/webhook/events';
+import { emitTreeWebhookEvent } from '@/lib/webhook/events';
 
 interface BatchPaymentRequest {
   paymentIds: number[];
@@ -209,13 +209,13 @@ export async function POST(request: Request) {
             ]
           );
           // Webhook delivery is best-effort and persisted/retried independently
-          // of the payment transaction.
-          void emitTreePaymentEvent('farmer.payment.processed', {
-            farmerId: farmer.id,
-            farmerRef: farmer.farmer_ref,
-            currency: currency || 'XLM ',
-            paymentMethod: paymentMethod || 'wallet',
-            source: 'admin_batch_processing',
+// of the verification transaction.
+          void emitTreeWebhookEvent('tree.verified', {
+            treeId: tree.id,
+            treeRef: tree.tree_ref,
+            previousStatus: 'planted',
+            newStatus: 'verified',
+            source: 'admin_batch_approval',
           });
         }
       }
