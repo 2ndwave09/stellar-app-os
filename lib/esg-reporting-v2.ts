@@ -10,13 +10,9 @@
  * BuyerAnalyticsSummary; rendering/export is delegated to separate utilities.
  */
 
-import type {
-  BuyerAnalyticsSummary,
-  BuyerOffsetTotals,
-  CoBenefitSummary,
-  SupplyChainProject,
-  SupplyChainStage,
-} from '@/lib/api/buyer-analytics';
+import type { BuyerAnalyticsSummary, SupplyChainProject } from '@/lib/api/buyer-analytics';
+
+export type { SupplyChainProject, SupplyChainStage } from '@/lib/api/buyer-analytics';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Report Data Models
@@ -164,16 +160,18 @@ export function buildPeriodLabel(start: string, end: string, type: ReportPeriodT
   }
 
   const start_ = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  const end_ = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const end_ = endDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
   return `${start_} - ${end_}`;
 }
 
 /**
  * Builds the carbon offsets section from buyer analytics.
  */
-function buildCarbonOffsetsSection(
-  analytics: BuyerAnalyticsSummary
-): CarbonOffsetsSection {
+function buildCarbonOffsetsSection(analytics: BuyerAnalyticsSummary): CarbonOffsetsSection {
   const lineItems = analytics.supplyChain.map((project) => {
     const status: 'active' | 'retired' | 'mixed' =
       project.retiredTonnes === 0
@@ -213,9 +211,7 @@ function buildCarbonOffsetsSection(
 /**
  * Builds the co-benefits section from buyer analytics.
  */
-function buildCoBenefitsSection(
-  analytics: BuyerAnalyticsSummary
-): CoBenefitsSection {
+function buildCoBenefitsSection(analytics: BuyerAnalyticsSummary): CoBenefitsSection {
   const benefits: CoBenefitLine[] = analytics.coBenefits.map((benefit) => ({
     name: benefit.name,
     projectCount: benefit.projectCount,
@@ -295,9 +291,7 @@ function buildStageCompletionSummary(
 /**
  * Builds the supply chain section from buyer analytics.
  */
-function buildSupplyChainSection(
-  analytics: BuyerAnalyticsSummary
-): SupplyChainSection {
+function buildSupplyChainSection(analytics: BuyerAnalyticsSummary): SupplyChainSection {
   const totalTonnes = analytics.totals.totalTonnes;
   const retiredTonnes = analytics.totals.retiredTonnes;
   const retirementRate = totalTonnes > 0 ? (retiredTonnes / totalTonnes) * 100 : 0;

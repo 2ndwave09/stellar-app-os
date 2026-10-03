@@ -9,6 +9,7 @@ import { WalletProvider } from '@/contexts/WalletContext';
 import { NotificationProvider } from '@/contexts/NotificationContext';
 import { TimeZoneProvider } from '@/contexts/TimeZoneContext';
 import { I18nProvider } from '@/components/providers/I18nProvider';
+import { ThemeInitScript } from '@/components/providers/ThemeInitScript';
 import { SkipLink } from '@/components/ui/SkipLink';
 import {
   NotificationCenterDrawer,
@@ -105,6 +106,8 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
         <meta name="apple-mobile-web-app-title" content="FarmCredit" />
         <meta name="mobile-web-app-capable" content="yes" />
+        {/* Apply the persisted/system theme before first paint to avoid FOUC. */}
+        <ThemeInitScript />
       </head>
       <body
         className={`${inter.variable} font-sans antialiased min-h-screen min-h-[100dvh] flex flex-col`}

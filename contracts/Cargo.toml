@@ -49,6 +49,8 @@ members = [
     "carbon-price-oracle",
     "carbon-futures",
     "community-offset-pool",
+    "xlm-bridge",
+    "insurance-pool",
     "atomic-swap",
     "farmer-bonus-pool",
     "carbon-fractionalization",

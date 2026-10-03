@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getPool } from '@/lib/db/client';
+import { getReadPool } from '@/lib/db/read-replica';
 import { isAdminRequest } from '@/lib/auth/admin';
 import { getTreeAnalytics, parseTreeAnalyticsFilters } from '@/lib/analytics/tree-survival';
 import { getCarbonOffsetEstimate, parseCarbonOffsetInput } from '@/lib/analytics/carbon-offset';
 import { processFarmerPayment, parseFarmerPaymentInput } from '@/lib/payments/farmer-payment';
 import { getFarmerPaymentMethods, parseFarmerPaymentMethodFilters } from '@/lib/payments/farmer-payment-methods';
+import { getProjectComparison, parseProjectComparisonInput } from '@/lib/analytics/project-comparison';
 import { getFarmerIncomePrediction, parseFarmerIncomePredictionInput } from '@/lib/analytics/farmer-income';
 import { getComplianceReport, parseComplianceReportInput } from '@/lib/analytics/compliance-report';
 import { createBulkPurchaseAgreement, parseBulkPurchaseInput } from '@/lib/marketplace/bulk-purchase';
@@ -23,7 +25,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
   try {
     const filters = parseTreeAnalyticsFilters(new URL(request.url).searchParams);
-    const report = await getTreeAnalytics(getPool(), filters);
+    const report = await getTreeAnalytics(getReadPool(), filters);
     return NextResponse.json(report, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -47,7 +49,7 @@ export async function GET_PAYMENT_METHODS(request: Request): Promise<NextRespons
   }
   try {
     const filters = parseFarmerPaymentMethodFilters(new URL(request.url).searchParams);
-    const methods = await getFarmerPaymentMethods(getPool(), filters);
+    const methods = await getFarmerPaymentMethods(getReadPool(), filters);
     return NextResponse.json(methods, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -118,7 +120,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
   }
   try {
     const input = parseFarmerIncomePredictionInput(await request.json());
-    const prediction = await getFarmerIncomePrediction(getPool(), input);
+    const prediction = await getFarmerIncomePrediction(getReadPool(), input);
     return NextResponse.json(prediction, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
@@ -133,7 +135,7 @@ export async function PATCH(request: Request): Promise<NextResponse> {
 /**
  * DELETE /api/admin/analytics/tree-survival
  *
- * Creates a bulk purchase agreement between a corporate buyer and farmers for
+* Creates a bulk purchase agreement between a corporate buyer and farmers for
  * 100+ metric ton batches at negotiated volume-discounted rates.
  */
 export async function DELETE(request: Request): Promise<NextResponse> {
@@ -141,13 +143,13 @@ export async function DELETE(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   try {
-    const input = parseBulkPurchaseInput(await request.json());
+const input = parseBulkPurchaseInput(await request.json());
     const agreement = await createBulkPurchaseAgreement(getPool(), input);
     return NextResponse.json(agreement, {
       headers: { 'Cache-Control': 'private, max-age=60, stale-while-revalidate=300' },
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to create bulk purchase agreement';
+const message = error instanceof Error ? error.message : 'Failed to create bulk purchase agreement';
     const status = /must be|required|invalid|unsupported|non-negative|at least/.test(message) ? 400 : 500;
     console.error('[bulk-purchase]', error);
     return NextResponse.json({ error: message }, { status });
