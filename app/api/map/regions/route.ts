@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db/client';
+import {
+  MAP_REGIONS_CACHE_KEY,
+  getCachedMapData,
+  setCachedMapData,
+  type RegionMarker,
+} from '@/lib/cache/map-cache';
+import { getReadPool } from '@/lib/db/read-replica';
 
 /**
  * GET /api/map/regions
@@ -9,20 +15,29 @@ import { getPool } from '@/lib/db/client';
  *
  * Response shape:
  * {
- *   regions: Array<{
- *     regionKey: string;   // opaque HMAC identifier
- *     lat: number;         // cell center latitude  (~0.25° from any real point)
- *     lng: number;         // cell center longitude (~0.25° from any real point)
- *     treesPlanted: number;
- *     farmers: number;
- *   }>
+ *   regions: Array<[
+ *     {
+ *       regionKey: string;   // opaque HMAC identifier for the snapped grid cell
+ *       lat: number;         // public cell center latitude
+ *       lng: number;         // public cell center longitude
+ *       treesPlanted: number;
+ *       farmers: number;
+ *   } ]
  * }
  */
 export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    const pool = getPool();
+    const cachedRegions = await getCachedMapData<RegionMarker[]>(MAP_REGIONS_CACHE_KEY);
+    if (cachedRegions) {
+      return NextResponse.json(
+        { regions: cachedRegions },
+        { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=300' } }
+      );
+    }
+
+    const pool = getReadPool();
 
     const { rows } = await pool.query<{
       region_key: string;
@@ -35,8 +50,8 @@ export async function GET() {
         region_key,
         center_lat,
         center_lon,
-        COUNT(*)                       AS trees_planted,
-        COUNT(DISTINCT farmer_id)      AS farmers
+        COUNT(*)                   AS trees_planted,
+        COUNT(DISTINCT farmer_id)  AS farmers
       FROM planting_regions
       GROUP BY region_key, center_lat, center_lon
       ORDER BY trees_planted DESC
@@ -50,9 +65,11 @@ export async function GET() {
       farmers: parseInt(r.farmers, 10),
     }));
 
+    await setCachedMapData(MAP_REGIONS_CACHE_KEY, regions);
+
     return NextResponse.json(
       { regions },
-      { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } }
+      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=300' } }
     );
   } catch (error) {
     // If the table doesn't exist yet return an empty list so the map still renders
@@ -60,7 +77,7 @@ export async function GET() {
     if (msg.includes('does not exist') || msg.includes('relation')) {
       return NextResponse.json({ regions: [] });
     }
-    console.error('[map/regions] error:', error);
+    console.error('[map/regions] error', error);
     return NextResponse.json({ error: 'Failed to load region data' }, { status: 500 });
   }
 }
