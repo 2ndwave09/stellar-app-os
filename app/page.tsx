@@ -16,7 +16,7 @@ import {
   CardContent,
 } from '@/components/molecules/Card';
 import { TransactionHistoryModal } from '@/components/ui/TransactionHistoryModal';
-import { useTranslation } from '@/hooks/useTranslation';
+import { useAppTranslation as useTranslation } from '@/hooks/useTranslation';
 import { useToast } from '@/hooks/useToast';
 
 export default function HomePage(): JSX.Element {
