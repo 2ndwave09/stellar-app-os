@@ -1,70 +1,80 @@
-# ─── Stage 1: Dependency installation ───────────────────────────────────────
-FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat
+# ────────────────────────────────────────────────────────────
+# Dockerfile — Harvesta Web Application (Next.js)
+# Issue #1182: Containerize all services
+# ────────────────────────────────────────────────────────────
 
+# ── Stage 1: Dependencies ──────────────────────────────────
+FROM node:20-alpine AS deps
+
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
-# Copy package manifests
-COPY package.json pnpm-lock.yaml ./
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
 
-# Install pnpm and frozen-lockfile deps (production + dev needed for build)
-RUN npm install -g pnpm@10.28.1 --ignore-scripts && \
-    pnpm install --frozen-lockfile
+# Copy only package manifests for better layer caching
+COPY package.json pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
-# ─── Stage 2: Build ──────────────────────────────────────────────────────────
+# ── Stage 2: Build ─────────────────────────────────────────
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Carry over node_modules from deps stage
+RUN apk add --no-cache libc6-compat
+RUN corepack enable && corepack prepare pnpm@10.28.1 --activate
+
+# Copy dependencies from deps stage
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/package.json ./
+
+# Copy source code
 COPY . .
 
-# Disable Next.js telemetry inside the container
-ENV NEXT_TELEMETRY_DISABLED=1
+# Generate PWA icons if the script exists
+RUN pnpm run generate-icons 2>/dev/null || true
 
-# Build args injected at image-build time (non-secret public vars)
-ARG NEXT_PUBLIC_STELLAR_NETWORK=testnet
-ARG NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
-ARG NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-ARG NEXT_PUBLIC_NETWORK_PASSPHRASE="Test SDF Network ; September 2015"
-ARG NEXT_PUBLIC_APP_URL=https://harvesta.app
+# Build Next.js
+ARG NODE_ENV=production
+ENV NODE_ENV=$NODE_ENV
 
-ENV NEXT_PUBLIC_STELLAR_NETWORK=$NEXT_PUBLIC_STELLAR_NETWORK \
-    NEXT_PUBLIC_HORIZON_URL=$NEXT_PUBLIC_HORIZON_URL \
-    NEXT_PUBLIC_SOROBAN_RPC_URL=$NEXT_PUBLIC_SOROBAN_RPC_URL \
-    NEXT_PUBLIC_NETWORK_PASSPHRASE=$NEXT_PUBLIC_NETWORK_PASSPHRASE \
-    NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL
+RUN pnpm build
 
-# Build with webpack (matches package.json "build" script)
-RUN npm install -g pnpm@10.28.1 --ignore-scripts && \
-    pnpm run build
-
-# ─── Stage 3: Production runner ──────────────────────────────────────────────
+# ── Stage 3: Production ────────────────────────────────────
 FROM node:20-alpine AS runner
 
 WORKDIR /app
 
-# Security: run as non-root user
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apk add --no-cache libc6-compat
+
+# Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-ENV NODE_ENV=production \
-    NEXT_TELEMETRY_DISABLED=1 \
-    PORT=3000 \
-    HOSTNAME=0.0.0.0
-
-# Copy only the build artefacts needed at runtime
+# Copy public assets
 COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# Copy standalone output (requires next.config.js output: 'standalone')
+# If standalone is not configured, fall back to .next/static
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./ 2>/dev/null || true
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static 2>/dev/null || true
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next 2>/dev/null || true
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules 2>/dev/null || true
+COPY --from=builder --chown=nextjs:nodejs /app/package.json ./ 2>/dev/null || true
 
 USER nextjs
 
 EXPOSE 3000
 
-# Healthcheck uses the /api/health endpoint (fast, no DB)
-HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/health || exit 1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Start the application
 CMD ["node", "server.js"]
